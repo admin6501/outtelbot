@@ -287,12 +287,26 @@ do_remove() {
 do_update() {
   load_state
   if [[ -z "$INSTALL_DIR" || ! -d "$INSTALL_DIR/.git" ]]; then err "نصب یافت نشد."; return; fi
-  msg "به‌روزرسانی پروژه از گیت‌هاب..."
-  git -C "$INSTALL_DIR" stash >/dev/null 2>&1
-  git -C "$INSTALL_DIR" pull >/dev/null 2>&1
-  git -C "$INSTALL_DIR" stash pop >/dev/null 2>&1
+  # تشخیص مسیر فایل‌های ربات
+  if [[ -z "$BOT_DIR" ]]; then
+    if [[ -f "$INSTALL_DIR/index.php" ]]; then BOT_DIR="$INSTALL_DIR"
+    elif [[ -f "$INSTALL_DIR/outbound_bot/index.php" ]]; then BOT_DIR="$INSTALL_DIR/outbound_bot"
+    else BOT_DIR="$INSTALL_DIR"; fi
+  fi
+  msg "پشتیبان‌گیری از config.php ..."
+  [[ -f "$BOT_DIR/config.php" ]] && cp "$BOT_DIR/config.php" /tmp/outtelbot_config.bak
+  msg "دریافت آخرین تغییرات از گیت‌هاب (force)..."
+  git -C "$INSTALL_DIR" fetch --all -q
+  local br; br="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD)"
+  git -C "$INSTALL_DIR" reset --hard "origin/${br}" -q
+  # بازگردانی config.php کاربر
+  [[ -f /tmp/outtelbot_config.bak ]] && cp /tmp/outtelbot_config.bak "$BOT_DIR/config.php"
   chown -R www-data:www-data "$INSTALL_DIR"
-  ok "پروژه به‌روزرسانی شد. (فایل config.php شما حفظ شد)"
+  save_state
+  msg "ری‌استارت سرویس‌ها برای پاک‌سازی کش PHP..."
+  detect_php_fpm
+  systemctl restart "$PHP_FPM" nginx 2>/dev/null
+  ok "پروژه به آخرین نسخه به‌روزرسانی شد و سرویس‌ها ری‌استارت شدند. (config.php شما حفظ شد)"
 }
 
 # =====================================================================
