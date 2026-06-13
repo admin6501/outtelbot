@@ -175,6 +175,7 @@ do_install() {
   open_firewall
 
   # کلون پروژه
+  git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     msg "پروژه از قبل وجود دارد، در حال به‌روزرسانی..."
     git -C "$INSTALL_DIR" pull >/dev/null 2>&1
@@ -296,6 +297,7 @@ do_update() {
   msg "پشتیبان‌گیری از config.php ..."
   [[ -f "$BOT_DIR/config.php" ]] && cp "$BOT_DIR/config.php" /tmp/outtelbot_config.bak
   msg "دریافت آخرین تغییرات از گیت‌هاب (force)..."
+  git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null
   git -C "$INSTALL_DIR" fetch --all -q
   local br; br="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref HEAD)"
   git -C "$INSTALL_DIR" reset --hard "origin/${br}" -q
