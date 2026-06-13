@@ -190,7 +190,9 @@ function admin_handle_callback($cb, $u) {
         case 'a_plan_del': db()->prepare("DELETE FROM plans WHERE id=?")->execute([$p1]); admin_list_plans($chat, $mid); break;
 
         /* سفارش‌ها */
-        case 'a_orders': admin_list_orders($chat, $mid); break;
+        case 'a_orders': admin_list_orders($chat, $mid, 'pending', 0); break;
+        case 'a_orders_pending': admin_list_orders($chat, $mid, 'pending', (int)$p1); break;
+        case 'a_orders_all': admin_list_orders($chat, $mid, 'all', (int)$p1); break;
         case 'a_order': admin_show_order($chat, $mid, $p1); break;
         case 'a_oappr':
             db()->prepare("UPDATE orders SET status='paid', updated_at=? WHERE id=?")->execute([now(), $p1]);
@@ -236,6 +238,7 @@ function admin_handle_callback($cb, $u) {
 
         /* کاربران */
         case 'a_users': admin_users_home($chat, $mid); break;
+        case 'a_users_list': admin_list_users($chat, $mid, (int)$p1); break;
         case 'a_user_search': set_step($tg, 'admin_user_search'); edit($chat, $mid, "👤 آیدی عددی یا یوزرنیم کاربر را ارسال کنید:\n/cancel برای لغو"); break;
         case 'a_user': admin_show_user($chat, $mid, $p1); break;
         case 'a_user_block': db()->prepare("UPDATE users SET is_blocked=1-is_blocked WHERE tg_id=?")->execute([$p1]); admin_show_user($chat, $mid, $p1); break;
@@ -342,14 +345,31 @@ function admin_plan_pick_loc($chat, $mid) {
 }
 
 /* ---------- سفارش‌ها ---------- */
-function admin_list_orders($chat, $mid) {
-    $rows = db()->query("SELECT * FROM orders WHERE status IN('pending_approval','paid') ORDER BY id DESC LIMIT 30")->fetchAll();
+function admin_list_orders($chat, $mid, $filter = 'pending', $page = 0) {
+    $per = 12; $off = $page * $per;
+    if ($filter === 'all') {
+        $rows = db()->query("SELECT * FROM orders ORDER BY id DESC LIMIT $per OFFSET $off")->fetchAll();
+        $total = db()->query("SELECT COUNT(*) c FROM orders")->fetch()['c'];
+        $title = "🧾 <b>همه سفارش‌ها</b> (کل: {$total})";
+    } else {
+        $rows = db()->query("SELECT * FROM orders WHERE status IN('pending_approval','paid') ORDER BY id DESC LIMIT $per OFFSET $off")->fetchAll();
+        $total = db()->query("SELECT COUNT(*) c FROM orders WHERE status IN('pending_approval','paid')")->fetch()['c'];
+        $title = "🧾 <b>سفارش‌های در انتظار رسیدگی</b> (کل: {$total})";
+    }
     $kb = [];
+    $kb[] = [
+        btn(($filter === 'pending' ? '🔘 ' : '') . 'در انتظار', 'a_orders'),
+        btn(($filter === 'all' ? '🔘 ' : '') . 'همه سفارش‌ها', 'a_orders_all:0'),
+    ];
     foreach ($rows as $r) {
         $kb[] = [btn("#{$r['id']} | {$r['plan_title']} | " . status_label($r['status']), 'a_order:' . $r['id'])];
     }
+    $nav = [];
+    if ($page > 0) $nav[] = btn('⬅️ قبلی', 'a_orders_' . $filter . ':' . ($page - 1));
+    if ($off + $per < $total) $nav[] = btn('بعدی ➡️', 'a_orders_' . $filter . ':' . ($page + 1));
+    if ($nav) $kb[] = $nav;
     $kb[] = [btn('🔙 بازگشت', 'a_back')];
-    $t = "🧾 <b>سفارش‌های در انتظار رسیدگی</b>\n" . (!$rows ? "موردی وجود ندارد." : "یک سفارش را انتخاب کنید:");
+    $t = $title . "\n" . (!$rows ? "موردی وجود ندارد." : "یک سفارش را انتخاب کنید:");
     edit($chat, $mid, $t, inline($kb));
 }
 function admin_show_order($chat, $mid, $oid) {
@@ -403,7 +423,30 @@ function admin_users_home($chat, $mid) {
     $users = db()->query("SELECT COUNT(*) c FROM users")->fetch()['c'];
     $blocked = db()->query("SELECT COUNT(*) c FROM users WHERE is_blocked=1")->fetch()['c'];
     $t = "👤 <b>مدیریت کاربران</b>\n\nتعداد کل: <b>{$users}</b>\nمسدود: <b>{$blocked}</b>";
-    edit($chat, $mid, $t, inline([[btn('🔍 جستجوی کاربر', 'a_user_search')], [btn('🔙 بازگشت', 'a_back')]]));
+    edit($chat, $mid, $t, inline([
+        [btn('📋 لیست همه کاربران', 'a_users_list:0')],
+        [btn('🔍 جستجوی کاربر', 'a_user_search')],
+        [btn('🔙 بازگشت', 'a_back')],
+    ]));
+}
+function admin_list_users($chat, $mid, $page = 0) {
+    $per = 10; $off = $page * $per;
+    $rows = db()->query("SELECT * FROM users ORDER BY id DESC LIMIT $per OFFSET $off")->fetchAll();
+    $total = db()->query("SELECT COUNT(*) c FROM users")->fetch()['c'];
+    $kb = [];
+    foreach ($rows as $r) {
+        $name = $r['first_name'] ?: 'کاربر';
+        $uname = $r['username'] ? '@' . $r['username'] : $r['tg_id'];
+        $blk = $r['is_blocked'] ? '🚫 ' : '';
+        $kb[] = [btn("{$blk}{$name} | {$uname} | " . fmt($r['balance']) . "ت", 'a_user:' . $r['tg_id'])];
+    }
+    $nav = [];
+    if ($page > 0) $nav[] = btn('⬅️ قبلی', 'a_users_list:' . ($page - 1));
+    if ($off + $per < $total) $nav[] = btn('بعدی ➡️', 'a_users_list:' . ($page + 1));
+    if ($nav) $kb[] = $nav;
+    $kb[] = [btn('🔙 بازگشت', 'a_users')];
+    $t = "📋 <b>لیست کاربران</b> (کل: {$total}) — صفحه " . ($page + 1) . "\n" . (!$rows ? "کاربری یافت نشد." : "برای مدیریت، روی کاربر بزنید:");
+    edit($chat, $mid, $t, inline($kb));
 }
 function admin_show_user($chat, $mid, $uid) {
     $usr = get_user($uid);

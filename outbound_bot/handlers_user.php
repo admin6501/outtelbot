@@ -304,15 +304,44 @@ function handle_discount_input($tg, $chat, $text) {
 
 /* ---------- سفارش‌های من ---------- */
 function show_my_orders($chat, $tg, $mid = null) {
-    $st = db()->prepare("SELECT * FROM orders WHERE user_tg=? ORDER BY id DESC LIMIT 15");
+    $st = db()->prepare("SELECT * FROM orders WHERE user_tg=? ORDER BY id DESC LIMIT 20");
     $st->execute([$tg]);
     $rows = $st->fetchAll();
-    $t = "📦 <b>سفارش‌های شما</b>\n\n";
-    if (!$rows) $t .= "هنوز سفارشی ثبت نکرده‌اید.";
-    foreach ($rows as $r) {
-        $t .= "🧾 #{$r['id']} — {$r['plan_title']}\n💰 " . fmt($r['price']) . " تومان — " . status_label($r['status']) . "\n\n";
+    $kb = [];
+    if (!$rows) {
+        $t = "📦 هنوز سفارشی ثبت نکرده‌اید.";
+    } else {
+        $t = "📦 <b>سفارش‌های شما</b>\nبرای مشاهده جزئیات، دریافت کانفیگ یا تمدید، روی هر سفارش بزنید:";
+        foreach ($rows as $r) {
+            $kb[] = [btn("🧾 #{$r['id']} | {$r['plan_title']} | " . status_label($r['status']), 'myorder:' . $r['id'])];
+        }
     }
-    $mid ? edit($chat, $mid, $t) : send($chat, $t);
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+function show_my_order_detail($chat, $mid, $tg, $oid) {
+    $st = db()->prepare("SELECT * FROM orders WHERE id=? AND user_tg=?");
+    $st->execute([$oid, $tg]);
+    $o = $st->fetch();
+    if (!$o) { edit($chat, $mid, "❌ سفارش یافت نشد."); return; }
+    $t = "🧾 <b>سفارش #{$o['id']}</b>\n\n"
+       . "📦 پلن: {$o['plan_title']}\n"
+       . "💰 مبلغ: " . fmt($o['price']) . " تومان\n"
+       . "💳 روش پرداخت: " . ($o['payment_method'] === 'wallet' ? 'کیف پول' : 'کارت به کارت') . "\n"
+       . "📌 وضعیت: " . status_label($o['status']) . "\n"
+       . "🕒 تاریخ: <code>{$o['created_at']}</code>";
+    if ($o['status'] === 'delivered' && $o['config_text']) {
+        $t .= "\n\n🔻 <b>اوت‌باند شما:</b>\n" . $o['config_text'];
+    }
+    $kb = [];
+    $plan = get_plan($o['plan_id']);
+    if ($plan && $plan['is_active']) {
+        $kb[] = [btn('🔄 تمدید / خرید مجدد همین پلن', 'plan:' . $o['plan_id'])];
+    } else {
+        $kb[] = [btn('🛒 مشاهده پلن‌های موجود', 'buy_home')];
+    }
+    $kb[] = [btn('🔙 بازگشت به سفارش‌ها', 'myorders_home')];
+    edit($chat, $mid, $t, inline($kb));
 }
 
 /* ---------- زیرمجموعه‌گیری ---------- */
@@ -375,6 +404,8 @@ function user_handle_callback($cb, $u) {
         case 'pw':       pay_with_wallet($chat, $mid, $tg, $parts[1]); break;
         case 'pc':       pay_card_to_card($chat, $mid, $tg, $parts[1]); break;
         case 'dc':       start_discount($chat, $mid, $tg, $parts[1]); break;
+        case 'myorders_home': show_my_orders($chat, $tg, $mid); break;
+        case 'myorder':  show_my_order_detail($chat, $mid, $tg, $parts[1]); break;
         case 'wallet_home':   show_wallet($chat, get_user($tg), $mid); break;
         case 'wallet_charge': start_charge($chat, $mid, $tg); break;
         case 'wallet_tx':     show_transactions($chat, $mid, $tg); break;
