@@ -217,7 +217,7 @@ function handle_order_receipt($tg, $chat, $file_id) {
     foreach ($ADMIN_IDS as $aid) {
         send_photo($aid, $file_id,
             "🧾 <b>رسید سفارش #{$oid}</b>\n👤 کاربر: {$un}\n📦 پلن: {$o['plan_title']}\n💰 مبلغ: " . fmt($o['price']) . " تومان",
-            inline([[btn('✅ تایید پرداخت', 'a_oappr:' . $oid), btn('❌ رد', 'a_orej:' . $oid)]]));
+            inline([[btn('✅ تایید پرداخت', 'a_oappr:' . $oid), btn('🚫 لغو سفارش', 'a_ocancel:' . $oid)]]));
     }
 }
 

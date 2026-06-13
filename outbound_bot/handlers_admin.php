@@ -113,6 +113,15 @@ function admin_handle_message($msg, $u) {
             send($chat, "✅ اوت‌باند برای کاربر ارسال شد و سفارش #{$oid} تحویل داده شد.");
             break;
 
+        case 'admin_cancel_amount':
+            $oid = $temp['order_id'];
+            $amount = (int)preg_replace('/\D/', '', $text);
+            $ok = cancel_order($oid, $amount);
+            set_step($tg, ''); set_temp($tg, []);
+            if ($ok) send($chat, "✅ سفارش #{$oid} لغو شد و " . fmt($amount) . " تومان به کیف پول کاربر بازگردانده شد.");
+            else send($chat, "این سفارش قبلاً لغو شده است.");
+            break;
+
         case 'admin_broadcast':
             set_step($tg, '');
             $all = db()->query("SELECT tg_id FROM users WHERE is_blocked=0")->fetchAll();
@@ -203,12 +212,19 @@ function admin_handle_callback($cb, $u) {
             set_step($tg, 'admin_send_config'); set_temp($tg, ['order_id' => $p1]);
             send($chat, "✍️ متن اوت‌باند/کانفیگ سفارش #{$p1} را ارسال کنید:\n/cancel برای لغو");
             break;
-        case 'a_orej':
-            $st = db()->prepare("SELECT * FROM orders WHERE id=?"); $st->execute([$p1]); $o = $st->fetch();
-            db()->prepare("UPDATE orders SET status='rejected', updated_at=? WHERE id=?")->execute([now(), $p1]);
-            if ($o && $o['payment_method'] === 'wallet') { add_balance($o['user_tg'], $o['price']); add_tx($o['user_tg'], $o['price'], 'refund', 'بازگشت وجه سفارش رد شده'); }
-            if ($o) send($o['user_tg'], "❌ سفارش #{$p1} شما رد شد." . ($o['payment_method'] === 'wallet' ? "\n💰 مبلغ به کیف پول شما بازگشت داده شد." : ""));
-            edit($chat, $mid, "سفارش #{$p1} رد شد.");
+        case 'a_ocancel': admin_cancel_menu($chat, $mid, $p1); break;
+        case 'a_ocfull':
+            $st = db()->prepare("SELECT price FROM orders WHERE id=?"); $st->execute([$p1]); $row = $st->fetch();
+            if (cancel_order($p1, $row['price'] ?? 0)) edit($chat, $mid, "✅ سفارش #{$p1} لغو و کل مبلغ به کیف پول کاربر بازگردانده شد.", inline([[btn('🔙 بازگشت', 'a_orders')]]));
+            else edit($chat, $mid, "این سفارش قبلاً لغو شده است.", inline([[btn('🔙 بازگشت', 'a_orders')]]));
+            break;
+        case 'a_ocnone':
+            if (cancel_order($p1, 0)) edit($chat, $mid, "✅ سفارش #{$p1} بدون بازگشت وجه لغو شد.", inline([[btn('🔙 بازگشت', 'a_orders')]]));
+            else edit($chat, $mid, "این سفارش قبلاً لغو شده است.", inline([[btn('🔙 بازگشت', 'a_orders')]]));
+            break;
+        case 'a_occustom':
+            set_step($tg, 'admin_cancel_amount'); set_temp($tg, ['order_id' => $p1]);
+            edit($chat, $mid, "✏️ مبلغی که باید به کیف پول کاربر بازگردد را وارد کنید (تومان):\nمثال: <code>30000</code>\n/cancel برای انصراف");
             break;
 
         /* شارژها */
@@ -380,13 +396,49 @@ function admin_show_order($chat, $mid, $oid) {
     $t = "🧾 <b>سفارش #{$o['id']}</b>\n👤 کاربر: {$un} ({$o['user_tg']})\n📦 پلن: {$o['plan_title']}\n💰 مبلغ: " . fmt($o['price']) . " تومان\n💳 روش: {$o['payment_method']}\n📌 وضعیت: " . status_label($o['status']) . "\n🕒 {$o['created_at']}";
     $kb = [];
     if ($o['status'] === 'pending_approval') {
-        $kb[] = [btn('✅ تایید پرداخت', 'a_oappr:' . $oid), btn('❌ رد', 'a_orej:' . $oid)];
+        $kb[] = [btn('✅ تایید پرداخت', 'a_oappr:' . $oid)];
         if ($o['receipt_file_id']) send_photo($chat, $o['receipt_file_id'], "🧾 رسید سفارش #{$oid}");
     } elseif ($o['status'] === 'paid') {
-        $kb[] = [btn('📤 ارسال کانفیگ', 'a_osend:' . $oid), btn('❌ رد', 'a_orej:' . $oid)];
+        $kb[] = [btn('📤 ارسال کانفیگ', 'a_osend:' . $oid)];
+    } elseif ($o['status'] === 'delivered') {
+        $kb[] = [btn('📤 ارسال مجدد کانفیگ', 'a_osend:' . $oid)];
+    }
+    if ($o['status'] !== 'rejected') {
+        $kb[] = [btn('🚫 لغو سفارش', 'a_ocancel:' . $oid)];
     }
     $kb[] = [btn('🔙 بازگشت', 'a_orders')];
     edit($chat, $mid, $t, inline($kb));
+}
+
+/* منوی انتخاب میزان بازگشت وجه هنگام لغو */
+function admin_cancel_menu($chat, $mid, $oid) {
+    $st = db()->prepare("SELECT * FROM orders WHERE id=?"); $st->execute([$oid]); $o = $st->fetch();
+    if (!$o) { edit($chat, $mid, "سفارش یافت نشد."); return; }
+    if ($o['status'] === 'rejected') { edit($chat, $mid, "این سفارش قبلاً لغو شده است.", inline([[btn('🔙 بازگشت', 'a_order:' . $oid)]])); return; }
+    $t = "🚫 <b>لغو سفارش #{$oid}</b>\n\n📦 {$o['plan_title']}\n💰 مبلغ سفارش: " . fmt($o['price']) . " تومان\n\nمیزان بازگشت وجه به کیف پول کاربر را انتخاب کنید:";
+    $kb = [
+        [btn('✅ لغو + بازگشت کامل (' . fmt($o['price']) . ' ت)', 'a_ocfull:' . $oid)],
+        [btn('🚫 لغو بدون بازگشت وجه', 'a_ocnone:' . $oid)],
+        [btn('✏️ لغو + بازگشت مبلغ دلخواه', 'a_occustom:' . $oid)],
+        [btn('🔙 انصراف', 'a_order:' . $oid)],
+    ];
+    edit($chat, $mid, $t, inline($kb));
+}
+
+/* لغو سفارش با مبلغ بازگشتی مشخص */
+function cancel_order($oid, $refund) {
+    $st = db()->prepare("SELECT * FROM orders WHERE id=?"); $st->execute([$oid]); $o = $st->fetch();
+    if (!$o || $o['status'] === 'rejected') return false;
+    db()->prepare("UPDATE orders SET status='rejected', updated_at=? WHERE id=?")->execute([now(), $oid]);
+    $refund = max(0, (int)$refund);
+    if ($refund > 0) {
+        add_balance($o['user_tg'], $refund);
+        add_tx($o['user_tg'], $refund, 'refund', 'بازگشت وجه سفارش لغوشده #' . $oid);
+    }
+    $msg = "❌ سفارش #{$oid} شما لغو شد.";
+    if ($refund > 0) $msg .= "\n💰 مبلغ " . fmt($refund) . " تومان به کیف پول شما بازگردانده شد.";
+    send($o['user_tg'], $msg);
+    return true;
 }
 
 /* ---------- شارژها ---------- */
