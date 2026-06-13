@@ -35,6 +35,7 @@ load_state() { [[ -f "$STATE_FILE" ]] && source "$STATE_FILE"; }
 save_state() {
   cat > "$STATE_FILE" <<EOF
 INSTALL_DIR="$INSTALL_DIR"
+BOT_DIR="$BOT_DIR"
 DOMAIN="$DOMAIN"
 PHP_FPM="$PHP_FPM"
 EOF
@@ -76,7 +77,7 @@ open_firewall() {
 # ---------- نوشتن config.php ----------
 write_config() {
   local php_ids="$1"
-  cat > "$INSTALL_DIR/config.php" <<EOF
+  cat > "$BOT_DIR/config.php" <<EOF
 <?php
 /* فایل تنظیمات - توسط نصاب خودکار ساخته شد */
 define('BOT_TOKEN', '${BOT_TOKEN}');
@@ -97,7 +98,7 @@ server {
     listen [::]:80;
     server_name ${DOMAIN};
 
-    root ${INSTALL_DIR};
+    root ${BOT_DIR};
     index index.php;
 
     access_log /var/log/nginx/outtelbot.access.log;
@@ -188,12 +189,23 @@ do_install() {
   fi
   ok "پروژه آماده شد."
 
+  # تشخیص محل فایل‌های ربات (ریشه یا زیرپوشه outbound_bot)
+  if [[ -f "$INSTALL_DIR/index.php" ]]; then
+    BOT_DIR="$INSTALL_DIR"
+  elif [[ -f "$INSTALL_DIR/outbound_bot/index.php" ]]; then
+    BOT_DIR="$INSTALL_DIR/outbound_bot"
+  else
+    err "فایل index.php در پروژه پیدا نشد. ساختار ریپو را بررسی کنید."
+    return 1
+  fi
+  msg "مسیر فایل‌های ربات: $BOT_DIR"
+
   # ساخت config و دسترسی‌ها
   write_config "$php_ids"
-  mkdir -p "$INSTALL_DIR/data"
+  mkdir -p "$BOT_DIR/data"
   chown -R www-data:www-data "$INSTALL_DIR"
   chmod -R 755 "$INSTALL_DIR"
-  chmod -R 775 "$INSTALL_DIR/data"
+  chmod -R 775 "$BOT_DIR/data"
   ok "تنظیمات نوشته شد."
 
   save_state

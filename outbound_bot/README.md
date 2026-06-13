@@ -34,7 +34,7 @@
 یک خط زیر را روی سرور خود (با کاربر root) اجرا کنید تا منوی نصب تعاملی باز شود:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/admin6501/outtelbot/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/admin6501/outtelbot/main/outbound_bot/install.sh)
 ```
 
 > اگر شاخه اصلی ریپوی شما `master` است، در آدرس بالا `main` را با `master` جایگزین کنید.
