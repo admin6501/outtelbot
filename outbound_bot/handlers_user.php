@@ -16,7 +16,7 @@ function user_handle_message($msg, $u) {
     }
     if ($text === '/cancel') {
         set_step($tg, ''); set_temp($tg, []);
-        send($chat, '✅ عملیات لغو شد.', main_menu_kb());
+        send($chat, '✅ عملیات لغو شد.', main_menu_kb($tg));
         return;
     }
 
@@ -48,7 +48,7 @@ function user_handle_message($msg, $u) {
         case '👥 زیرمجموعه‌گیری':  show_referral($chat, $tg); break;
         case '☎️ پشتیبانی':       show_support($chat); break;
         default:
-            send($chat, 'یکی از گزینه‌های منو را انتخاب کنید 👇', main_menu_kb());
+            send($chat, 'یکی از گزینه‌های منو را انتخاب کنید 👇', main_menu_kb($tg));
     }
 }
 
@@ -69,7 +69,7 @@ function handle_start($msg, $text, $u) {
         }
     }
     if (!check_join($tg)) { send_join_prompt($chat); return; }
-    send($chat, setting('welcome_text'), main_menu_kb());
+    send($chat, setting('welcome_text'), main_menu_kb($tg));
 }
 
 /* ---------- خرید ---------- */
@@ -206,11 +206,11 @@ function handle_order_receipt($tg, $chat, $file_id) {
     $st = db()->prepare("SELECT * FROM orders WHERE id=? AND user_tg=?");
     $st->execute([$oid, $tg]);
     $o = $st->fetch();
-    if (!$o) { set_step($tg, ''); send($chat, "❌ سفارش یافت نشد.", main_menu_kb()); return; }
+    if (!$o) { set_step($tg, ''); send($chat, "❌ سفارش یافت نشد.", main_menu_kb($tg)); return; }
     db()->prepare("UPDATE orders SET status='pending_approval', receipt_file_id=?, updated_at=? WHERE id=?")
         ->execute([$file_id, now(), $oid]);
     set_step($tg, ''); set_temp($tg, []);
-    send($chat, "✅ رسید شما ثبت شد و در انتظار تایید ادمین است.\n🧾 شماره سفارش: #{$oid}", main_menu_kb());
+    send($chat, "✅ رسید شما ثبت شد و در انتظار تایید ادمین است.\n🧾 شماره سفارش: #{$oid}", main_menu_kb($tg));
     $u = get_user($tg);
     $un = $u['username'] ? '@' . $u['username'] : $tg;
     global $ADMIN_IDS;
@@ -251,11 +251,11 @@ function handle_charge_receipt($tg, $chat, $file_id) {
     $st = db()->prepare("SELECT * FROM payments WHERE id=? AND user_tg=?");
     $st->execute([$pid, $tg]);
     $p = $st->fetch();
-    if (!$p) { set_step($tg, ''); send($chat, "❌ درخواست یافت نشد.", main_menu_kb()); return; }
+    if (!$p) { set_step($tg, ''); send($chat, "❌ درخواست یافت نشد.", main_menu_kb($tg)); return; }
     db()->prepare("UPDATE payments SET status='pending', receipt_file_id=?, updated_at=? WHERE id=?")
         ->execute([$file_id, now(), $pid]);
     set_step($tg, ''); set_temp($tg, []);
-    send($chat, "✅ رسید شما ثبت شد و در انتظار تایید ادمین است.", main_menu_kb());
+    send($chat, "✅ رسید شما ثبت شد و در انتظار تایید ادمین است.", main_menu_kb($tg));
     $u = get_user($tg);
     $un = $u['username'] ? '@' . $u['username'] : $tg;
     global $ADMIN_IDS;
@@ -288,7 +288,7 @@ function handle_discount_input($tg, $chat, $text) {
     $temp = get_temp($tg);
     $plan_id = $temp['plan_id'] ?? 0;
     $p = get_plan($plan_id);
-    if (!$p) { set_step($tg, ''); send($chat, "❌ پلن یافت نشد.", main_menu_kb()); return; }
+    if (!$p) { set_step($tg, ''); send($chat, "❌ پلن یافت نشد.", main_menu_kb($tg)); return; }
     list($final, $off, $valid) = apply_discount($p['price'], trim($text));
     set_step($tg, '');
     if (!$valid) {
@@ -386,7 +386,7 @@ function user_handle_callback($cb, $u) {
     if ($cmd === 'check_join') {
         if (check_join($tg)) {
             tg('deleteMessage', ['chat_id' => $chat, 'message_id' => $mid]);
-            send($chat, setting('welcome_text'), main_menu_kb());
+            send($chat, setting('welcome_text'), main_menu_kb($tg));
         } else {
             answer($cb['id'], 'هنوز عضو کانال نشده‌اید!', true);
         }

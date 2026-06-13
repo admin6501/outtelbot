@@ -16,14 +16,62 @@ function admin_menu($chat, $mid = null) {
     $mid ? edit($chat, $mid, $t, $kb) : send($chat, $t, $kb);
 }
 
+/* کیبورد ثابت پایین صفحه برای پنل مدیریت */
+function admin_menu_kb() {
+    return [
+        'keyboard' => [
+            [['text' => '📊 آمار'], ['text' => '🧾 سفارش‌ها']],
+            [['text' => '🗂 دسته‌بندی‌ها'], ['text' => '🌍 لوکیشن‌ها']],
+            [['text' => '📦 پلن‌ها'], ['text' => '💳 شارژها']],
+            [['text' => '🎟 کد تخفیف'], ['text' => '👤 کاربران']],
+            [['text' => '👥 تنظیمات زیرمجموعه'], ['text' => '📢 پیام همگانی']],
+            [['text' => '⚙️ تنظیمات'], ['text' => '🔙 منوی کاربر']],
+        ],
+        'resize_keyboard' => true,
+    ];
+}
+
+function admin_panel_open($chat) {
+    send($chat, "🛠 <b>پنل مدیریت</b>\nاز دکمه‌های پایین صفحه استفاده کنید 👇", admin_menu_kb());
+}
+
+/* آیا متن یکی از دکمه‌های کیبورد پنل مدیریت است؟ */
+function is_admin_menu_text($text) {
+    return in_array($text, [
+        '🛠 پنل مدیریت', '📊 آمار', '🧾 سفارش‌ها', '🗂 دسته‌بندی‌ها', '🌍 لوکیشن‌ها',
+        '📦 پلن‌ها', '💳 شارژها', '🎟 کد تخفیف', '👤 کاربران', '👥 تنظیمات زیرمجموعه',
+        '📢 پیام همگانی', '⚙️ تنظیمات', '🔙 منوی کاربر',
+    ], true);
+}
+
 /* ---------- پیام‌های متنی ادمین (مراحل ورودی) ---------- */
 function admin_handle_message($msg, $u) {
     $chat = $msg['chat']['id'];
     $tg   = $msg['from']['id'];
     $text = trim($msg['text'] ?? '');
 
-    if ($text === '/admin') { set_step($tg, ''); set_temp($tg, []); admin_menu($chat); return; }
-    if ($text === '/cancel') { set_step($tg, ''); set_temp($tg, []); send($chat, '✅ لغو شد.'); admin_menu($chat); return; }
+    if ($text === '/admin' || $text === '🛠 پنل مدیریت') { set_step($tg, ''); set_temp($tg, []); admin_panel_open($chat); return; }
+    if ($text === '/cancel') { set_step($tg, ''); set_temp($tg, []); send($chat, '✅ لغو شد.', admin_menu_kb()); return; }
+
+    // دکمه‌های کیبوردی پنل مدیریت
+    if (is_admin_menu_text($text)) {
+        set_step($tg, ''); set_temp($tg, []);
+        switch ($text) {
+            case '📊 آمار':            admin_stats($chat, null); return;
+            case '🧾 سفارش‌ها':         admin_list_orders($chat, null, 'pending', 0); return;
+            case '🗂 دسته‌بندی‌ها':      admin_list_cats($chat, null); return;
+            case '🌍 لوکیشن‌ها':        admin_list_locs($chat, null); return;
+            case '📦 پلن‌ها':           admin_list_plans($chat, null); return;
+            case '💳 شارژها':           admin_list_charges($chat, null); return;
+            case '🎟 کد تخفیف':         admin_list_dcs($chat, null); return;
+            case '👤 کاربران':          admin_users_home($chat, null); return;
+            case '👥 تنظیمات زیرمجموعه': admin_ref($chat, null); return;
+            case '📢 پیام همگانی':      set_step($tg, 'admin_broadcast'); send($chat, "📢 متن پیام همگانی را ارسال کنید:\n/cancel برای لغو"); return;
+            case '⚙️ تنظیمات':          admin_settings($chat, null); return;
+            case '🔙 منوی کاربر':       send($chat, "به منوی کاربری بازگشتید 👇", main_menu_kb($tg)); return;
+        }
+        return;
+    }
 
     $step = $u['step'];
     $temp = get_temp($tg);
@@ -135,7 +183,7 @@ function admin_handle_message($msg, $u) {
             break;
 
         default:
-            send($chat, "برای ورود به پنل /admin را بزنید.");
+            send($chat, "از دکمه «🛠 پنل مدیریت» در منو استفاده کنید.");
     }
 }
 
@@ -285,7 +333,7 @@ function admin_handle_callback($cb, $u) {
 }
 
 /* ---------- آمار ---------- */
-function admin_stats($chat, $mid) {
+function admin_stats($chat, $mid = null) {
     $users = db()->query("SELECT COUNT(*) c FROM users")->fetch()['c'];
     $orders = db()->query("SELECT COUNT(*) c FROM orders")->fetch()['c'];
     $delivered = db()->query("SELECT COUNT(*) c FROM orders WHERE status='delivered'")->fetch()['c'];
@@ -299,7 +347,7 @@ function admin_stats($chat, $mid) {
        . "⏳ در انتظار رسیدگی: <b>{$pending}</b>\n"
        . "💳 شارژ در انتظار: <b>{$charges}</b>\n"
        . "💰 درآمد (تحویل‌شده): <b>" . fmt($revenue) . "</b> تومان";
-    edit($chat, $mid, $t, inline([[btn('🔙 بازگشت', 'a_back')]]));
+    out($chat, $mid, $t, inline([[btn('🔙 بازگشت', 'a_back')]]));
 }
 
 /* ---------- دسته‌بندی ---------- */
@@ -386,7 +434,7 @@ function admin_list_orders($chat, $mid, $filter = 'pending', $page = 0) {
     if ($nav) $kb[] = $nav;
     $kb[] = [btn('🔙 بازگشت', 'a_back')];
     $t = $title . "\n" . (!$rows ? "موردی وجود ندارد." : "یک سفارش را انتخاب کنید:");
-    edit($chat, $mid, $t, inline($kb));
+    out($chat, $mid, $t, inline($kb));
 }
 function admin_show_order($chat, $mid, $oid) {
     $st = db()->prepare("SELECT * FROM orders WHERE id=?"); $st->execute([$oid]); $o = $st->fetch();
@@ -444,7 +492,7 @@ function cancel_order($oid, $refund) {
 /* ---------- شارژها ---------- */
 function admin_list_charges($chat, $mid) {
     $rows = db()->query("SELECT * FROM payments WHERE status='pending' ORDER BY id DESC LIMIT 30")->fetchAll();
-    edit($chat, $mid, "💳 <b>درخواست‌های شارژ در انتظار</b>\n" . (!$rows ? "موردی نیست." : "رسیدها در پیام‌های زیر ارسال شدند 👇"), inline([[btn('🔙 بازگشت', 'a_back')]]));
+    out($chat, $mid, "💳 <b>درخواست‌های شارژ در انتظار</b>\n" . (!$rows ? "موردی نیست." : "رسیدها در پیام‌های زیر ارسال شدند 👇"), inline([[btn('🔙 بازگشت', 'a_back')]]));
     // ارسال رسیدها
     foreach ($rows as $r) {
         if ($r['receipt_file_id']) {
@@ -471,11 +519,11 @@ function admin_list_dcs($chat, $mid = null) {
 }
 
 /* ---------- کاربران ---------- */
-function admin_users_home($chat, $mid) {
+function admin_users_home($chat, $mid = null) {
     $users = db()->query("SELECT COUNT(*) c FROM users")->fetch()['c'];
     $blocked = db()->query("SELECT COUNT(*) c FROM users WHERE is_blocked=1")->fetch()['c'];
     $t = "👤 <b>مدیریت کاربران</b>\n\nتعداد کل: <b>{$users}</b>\nمسدود: <b>{$blocked}</b>";
-    edit($chat, $mid, $t, inline([
+    out($chat, $mid, $t, inline([
         [btn('📋 لیست همه کاربران', 'a_users_list:0')],
         [btn('🔍 جستجوی کاربر', 'a_user_search')],
         [btn('🔙 بازگشت', 'a_back')],
@@ -514,7 +562,7 @@ function admin_show_user($chat, $mid, $uid) {
 }
 
 /* ---------- زیرمجموعه‌گیری ---------- */
-function admin_ref($chat, $mid) {
+function admin_ref($chat, $mid = null) {
     $en = setting('referral_enabled', '1') === '1';
     $t = "👥 <b>تنظیمات زیرمجموعه‌گیری</b>\n\nوضعیت: " . ($en ? '🟢 فعال' : '🔴 غیرفعال') . "\nدرصد پاداش: <b>" . setting('referral_percent') . "%</b>\n\nپاداش هنگام تحویل خرید زیرمجموعه به کیف پول دعوت‌کننده اضافه می‌شود.";
     $kb = [
@@ -522,7 +570,7 @@ function admin_ref($chat, $mid) {
         [btn('✏️ تغییر درصد پاداش', 'a_ref_percent')],
         [btn('🔙 بازگشت', 'a_back')],
     ];
-    edit($chat, $mid, $t, inline($kb));
+    out($chat, $mid, $t, inline($kb));
 }
 
 /* ---------- تنظیمات ---------- */

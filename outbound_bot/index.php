@@ -24,7 +24,7 @@ try {
         $text = $msg['text'] ?? '';
         $step = $u['step'];
 
-        if (is_admin($tg) && ($text === '/admin' || strpos($step, 'admin_') === 0)) {
+        if (is_admin($tg) && ($text === '/admin' || strpos($step, 'admin_') === 0 || is_admin_menu_text($text))) {
             admin_handle_message($msg, $u);
         } else {
             user_handle_message($msg, $u);

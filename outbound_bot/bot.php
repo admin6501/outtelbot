@@ -223,15 +223,20 @@ function inline($rows) { return ['inline_keyboard' => $rows]; }
 function btn($text, $data) { return ['text' => $text, 'callback_data' => $data]; }
 function url_btn($text, $url) { return ['text' => $text, 'url' => $url]; }
 
-function main_menu_kb() {
-    return [
-        'keyboard' => [
-            [['text' => '🛒 خرید اوت‌باند'], ['text' => '👛 کیف پول']],
-            [['text' => '📦 سفارش‌های من'], ['text' => '🎁 کد تخفیف']],
-            [['text' => '👥 زیرمجموعه‌گیری'], ['text' => '☎️ پشتیبانی']],
-        ],
-        'resize_keyboard' => true,
+function main_menu_kb($tg = null) {
+    $kb = [
+        [['text' => '🛒 خرید اوت‌باند'], ['text' => '👛 کیف پول']],
+        [['text' => '📦 سفارش‌های من'], ['text' => '🎁 کد تخفیف']],
+        [['text' => '👥 زیرمجموعه‌گیری'], ['text' => '☎️ پشتیبانی']],
     ];
+    if ($tg !== null && is_admin($tg)) {
+        $kb[] = [['text' => '🛠 پنل مدیریت']];
+    }
+    return ['keyboard' => $kb, 'resize_keyboard' => true];
+}
+
+function out($chat, $mid, $text, $kb = null) {
+    return $mid ? edit($chat, $mid, $text, $kb) : send($chat, $text, $kb);
 }
 
 function bot_username() {
