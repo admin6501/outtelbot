@@ -140,6 +140,11 @@ function db_init() {
     $addcol('plans', 'inbound_id', "INTEGER DEFAULT 0");
     $addcol('plans', 'traffic_gb', "INTEGER DEFAULT 0");
     $addcol('plans', 'duration_days', "INTEGER DEFAULT 0");
+    $addcol('orders', 'panel_inbound', "INTEGER DEFAULT 0");
+    $addcol('orders', 'panel_client_id', "TEXT DEFAULT ''");
+    $addcol('orders', 'panel_email', "TEXT DEFAULT ''");
+    $addcol('orders', 'panel_sub_id', "TEXT DEFAULT ''");
+    $addcol('orders', 'renew_of', "INTEGER DEFAULT 0");
 }
 
 /* ---------- تنظیمات ---------- */

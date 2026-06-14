@@ -107,6 +107,23 @@ function panel_add_client($inbound_id, $client) {
     return is_array($r) && !empty($r['success']);
 }
 
+function panel_update_client($inbound_id, $client_secret, $client) {
+    $settings = json_encode(['clients' => [$client]], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $r = panel_api('POST', '/panel/api/inbounds/updateClient/' . rawurlencode($client_secret), ['id' => (int)$inbound_id, 'settings' => $settings]);
+    return is_array($r) && !empty($r['success']);
+}
+
+function panel_reset_client_traffic($inbound_id, $email) {
+    $r = panel_api('POST', '/panel/api/inbounds/' . (int)$inbound_id . '/resetClientTraffic/' . rawurlencode($email));
+    return is_array($r) && !empty($r['success']);
+}
+
+function panel_get_client_traffic($email) {
+    $r = panel_api('GET', '/panel/api/inbounds/getClientTraffics/' . rawurlencode($email));
+    if (is_array($r) && !empty($r['success']) && isset($r['obj'])) return $r['obj'];
+    return null;
+}
+
 /* تست اتصال + نمایش اینباندها */
 function panel_test() {
     if (!setting('panel_url', '')) return [false, 'آدرس پنل تنظیم نشده است.'];
@@ -220,33 +237,83 @@ function try_auto_deliver($oid) {
     if (!$o) return false;
     $plan = get_plan($o['plan_id']);
     if (!$plan || (int)($plan['inbound_id'] ?? 0) <= 0) return false;
+
+    // اگر تمدید است و سفارش اصلی روی پنل کلاینت دارد → همان کلاینت را تمدید کن
+    $renewOf = (int)($o['renew_of'] ?? 0);
+    if ($renewOf > 0) {
+        $os = db()->prepare("SELECT * FROM orders WHERE id=?"); $os->execute([$renewOf]); $orig = $os->fetch();
+        if ($orig && !empty($orig['panel_client_id']) && (int)$orig['panel_inbound'] > 0) {
+            $link = panel_renew_client($orig, $plan);
+            if ($link !== false && $link !== '') {
+                db()->prepare("UPDATE orders SET panel_inbound=?, panel_client_id=?, panel_email=?, panel_sub_id=? WHERE id=?")
+                    ->execute([$orig['panel_inbound'], $orig['panel_client_id'], $orig['panel_email'], $orig['panel_sub_id'], $oid]);
+                deliver_order($oid, $link, true);
+                return true;
+            }
+            // اگر تمدید ناموفق بود، به ساخت کلاینت جدید برمی‌گردیم
+        }
+    }
+
+    return auto_create_client_and_deliver($oid, $o, $plan);
+}
+
+function auto_create_client_and_deliver($oid, $o, $plan) {
     $inbound = panel_get_inbound($plan['inbound_id']);
     if (!$inbound) return false;
     $protocol = $inbound['protocol'] ?? '';
-
     $email = 'tg' . $o['user_tg'] . '_o' . $oid;
     $expiry = ((int)$plan['duration_days'] > 0) ? (time() + (int)$plan['duration_days'] * 86400) * 1000 : 0;
     $totalGB = ((int)$plan['traffic_gb'] > 0) ? (int)$plan['traffic_gb'] * 1073741824 : 0;
     $subId = bin2hex(random_bytes(8));
     $secret = guidv4();
-
     $client = [
         'email' => $email, 'enable' => true, 'limitIp' => 0,
         'totalGB' => $totalGB, 'expiryTime' => $expiry,
         'tgId' => (string)$o['user_tg'], 'subId' => $subId, 'reset' => 0, 'flow' => '',
     ];
     if ($protocol === 'trojan') $client['password'] = $secret; else $client['id'] = $secret;
-
     if (!panel_add_client($plan['inbound_id'], $client)) return false;
 
     $subUrl = trim(setting('panel_sub_url', ''));
-    if ($subUrl !== '') {
-        $link = rtrim($subUrl, '/') . '/' . $subId;
-    } else {
-        $link = panel_build_link($inbound, $secret, $email);
-    }
+    $link = $subUrl !== '' ? rtrim($subUrl, '/') . '/' . $subId : panel_build_link($inbound, $secret, $email);
     if (!$link) return false;
 
+    db()->prepare("UPDATE orders SET panel_inbound=?, panel_client_id=?, panel_email=?, panel_sub_id=? WHERE id=?")
+        ->execute([$plan['inbound_id'], $secret, $email, $subId, $oid]);
     deliver_order($oid, $link);
     return true;
+}
+
+/* تمدید کلاینت موجود روی پنل: تاریخ انقضا تمدید و حجم تازه‌سازی می‌شود */
+function panel_renew_client($orig, $plan) {
+    $inbound_id = (int)$orig['panel_inbound'];
+    $secret = $orig['panel_client_id'];
+    $email = $orig['panel_email'];
+    $subId = $orig['panel_sub_id'];
+    $inbound = panel_get_inbound($inbound_id);
+    if (!$inbound) return false;
+    $protocol = $inbound['protocol'] ?? '';
+
+    // تاریخ انقضای فعلی را بگیر و از آن (یا اکنون) تمدید کن
+    $cur = panel_get_client_traffic($email);
+    $curExp = is_array($cur) ? (int)($cur['expiryTime'] ?? 0) : 0;
+    $nowMs = time() * 1000;
+    $base = ($curExp > $nowMs) ? $curExp : $nowMs;
+    $newExp = ((int)$plan['duration_days'] > 0) ? $base + (int)$plan['duration_days'] * 86400 * 1000 : 0;
+    $totalGB = ((int)$plan['traffic_gb'] > 0) ? (int)$plan['traffic_gb'] * 1073741824 : 0;
+
+    $client = [
+        'email' => $email, 'enable' => true, 'limitIp' => 0,
+        'totalGB' => $totalGB, 'expiryTime' => $newExp,
+        'tgId' => (string)$orig['user_tg'], 'subId' => $subId, 'reset' => 0, 'flow' => '',
+    ];
+    if ($protocol === 'trojan') $client['password'] = $secret; else $client['id'] = $secret;
+
+    if (!panel_update_client($inbound_id, $secret, $client)) return false;
+    // ریست حجم مصرفی تا حجم تمدیدشده تازه باشد
+    panel_reset_client_traffic($inbound_id, $email);
+
+    $subUrl = trim(setting('panel_sub_url', ''));
+    if ($subUrl !== '') return rtrim($subUrl, '/') . '/' . $subId;
+    return panel_build_link($inbound, $secret, $email);
 }

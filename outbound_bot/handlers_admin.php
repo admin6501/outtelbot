@@ -230,7 +230,7 @@ function admin_handle_message($msg, $u) {
     }
 }
 
-function deliver_order($oid, $config_text) {
+function deliver_order($oid, $config_text, $renew = false) {
     $st = db()->prepare("SELECT * FROM orders WHERE id=?");
     $st->execute([$oid]); $o = $st->fetch();
     if (!$o) return;
@@ -241,8 +241,12 @@ function deliver_order($oid, $config_text) {
         send($o['user_tg'], "🔄 <b>اوت‌باند سفارش #{$oid} به‌روزرسانی شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند جدید شما:\n\n{$config_text}");
         return; // ویرایش است؛ پاداش زیرمجموعه دوباره داده نمی‌شود
     }
-    send($o['user_tg'], "✅ <b>سفارش #{$oid} آماده شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند شما:\n\n{$config_text}");
-    // پاداش زیرمجموعه‌گیری (فقط در تحویل اول)
+    if ($renew) {
+        send($o['user_tg'], "🔄 <b>تمدید سفارش #{$oid} انجام شد!</b>\n\n📦 پلن: {$o['plan_title']}\n⏳ سرویس شما تمدید و حجم آن تازه‌سازی شد.\n\n🔻 اوت‌باند شما (همان لینک قبلی):\n\n{$config_text}");
+    } else {
+        send($o['user_tg'], "✅ <b>سفارش #{$oid} آماده شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند شما:\n\n{$config_text}");
+    }
+    // پاداش زیرمجموعه‌گیری (در تحویل اول و تمدید)
     if (setting('referral_enabled', '1') === '1') {
         $buyer = get_user($o['user_tg']);
         if ($buyer && $buyer['referred_by']) {

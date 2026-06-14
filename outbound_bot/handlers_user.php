@@ -174,10 +174,11 @@ function create_order($tg, $plan, $method) {
     list($final, $off, $valid) = apply_discount($plan['price'], $code, $plan['id']);
     $title = $plan['title'];
     if (!empty($temp['renew_of'])) $title .= ' (تمدید #' . $temp['renew_of'] . ')';
-    $st = db()->prepare("INSERT INTO orders(user_tg, plan_id, plan_title, price, status, payment_method, discount_code, created_at, updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?)");
+    $renew_of = (int)($temp['renew_of'] ?? 0);
+    $st = db()->prepare("INSERT INTO orders(user_tg, plan_id, plan_title, price, status, payment_method, discount_code, renew_of, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?)");
     $status = $method === 'wallet' ? 'paid' : 'awaiting_receipt';
-    $st->execute([$tg, $plan['id'], $title, $final, $status, $method, $valid, now(), now()]);
+    $st->execute([$tg, $plan['id'], $title, $final, $status, $method, $valid, $renew_of, now(), now()]);
     $oid = db()->lastInsertId();
     if ($valid) db()->prepare("UPDATE discount_codes SET used_count=used_count+1 WHERE code=?")->execute([$valid]);
     // پاک کردن کد تخفیف/علامت تمدید از temp
