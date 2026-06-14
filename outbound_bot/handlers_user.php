@@ -230,6 +230,7 @@ function show_wallet($chat, $u, $mid = null) {
     $kb = inline([
         [btn('➕ شارژ کیف پول', 'wallet_charge')],
         [btn('📜 تاریخچه تراکنش‌ها', 'wallet_tx')],
+        [btn('🔙 بازگشت به منوی اصلی', 'close')],
     ]);
     $mid ? edit($chat, $mid, $t, $kb) : send($chat, $t, $kb);
 }
