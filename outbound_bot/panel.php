@@ -297,21 +297,28 @@ function panel_renew_client($orig, $plan) {
     // تاریخ انقضای فعلی را بگیر و از آن (یا اکنون) تمدید کن
     $cur = panel_get_client_traffic($email);
     $curExp = is_array($cur) ? (int)($cur['expiryTime'] ?? 0) : 0;
+    $curTotal = is_array($cur) ? (int)($cur['total'] ?? 0) : 0; // سقف حجم فعلی (بایت) ۰=نامحدود
     $nowMs = time() * 1000;
     $base = ($curExp > $nowMs) ? $curExp : $nowMs;
     $newExp = ((int)$plan['duration_days'] > 0) ? $base + (int)$plan['duration_days'] * 86400 * 1000 : 0;
-    $totalGB = ((int)$plan['traffic_gb'] > 0) ? (int)$plan['traffic_gb'] * 1073741824 : 0;
+
+    // حجم: بدون ریست؛ حجم پلن جدید به سقف فعلی اضافه می‌شود (حجم باقی‌مانده حفظ می‌شود)
+    $planBytes = ((int)$plan['traffic_gb'] > 0) ? (int)$plan['traffic_gb'] * 1073741824 : 0;
+    if ($planBytes === 0 || $curTotal === 0) {
+        $newTotal = 0; // اگر پلن یا سرویس فعلی نامحدود است → نامحدود
+    } else {
+        $newTotal = $curTotal + $planBytes; // افزودن حجم جدید به سقف فعلی
+    }
 
     $client = [
         'email' => $email, 'enable' => true, 'limitIp' => 0,
-        'totalGB' => $totalGB, 'expiryTime' => $newExp,
+        'totalGB' => $newTotal, 'expiryTime' => $newExp,
         'tgId' => (string)$orig['user_tg'], 'subId' => $subId, 'reset' => 0, 'flow' => '',
     ];
     if ($protocol === 'trojan') $client['password'] = $secret; else $client['id'] = $secret;
 
     if (!panel_update_client($inbound_id, $secret, $client)) return false;
-    // ریست حجم مصرفی تا حجم تمدیدشده تازه باشد
-    panel_reset_client_traffic($inbound_id, $email);
+    // توجه: حجم مصرفی ریست نمی‌شود تا حجم باقی‌مانده حفظ شود
 
     $subUrl = trim(setting('panel_sub_url', ''));
     if ($subUrl !== '') return rtrim($subUrl, '/') . '/' . $subId;
