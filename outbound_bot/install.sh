@@ -287,6 +287,8 @@ do_remove() {
   msg "حذف کانفیگ nginx..."
   rm -f "$NGINX_SITE" "$NGINX_LINK"
   systemctl reload nginx 2>/dev/null
+  msg "حذف کرون..."
+  crontab -u www-data -l 2>/dev/null | grep -v "cron.php" | crontab -u www-data - 2>/dev/null
   if [[ -n "$INSTALL_DIR" && -d "$INSTALL_DIR" ]]; then
     msg "حذف فایل‌های پروژه از $INSTALL_DIR ..."
     rm -rf "$INSTALL_DIR"
@@ -319,6 +321,7 @@ do_update() {
   [[ -f /tmp/outtelbot_config.bak ]] && cp /tmp/outtelbot_config.bak "$BOT_DIR/config.php"
   chown -R www-data:www-data "$INSTALL_DIR"
   save_state
+  setup_cron
   msg "ری‌استارت سرویس‌ها برای پاک‌سازی کش PHP..."
   detect_php_fpm
   systemctl restart "$PHP_FPM" nginx 2>/dev/null
