@@ -124,6 +124,10 @@ function db_init() {
         'panel_cookie_time'=> '0',
         'welcome_text'     => "🌐 به ربات فروش اوت‌باند خوش آمدید!\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
         'bot_username'     => '',
+        'warn_days'        => '2',
+        'warn_gb'          => '1',
+        'del_grace_time'   => '1',
+        'del_grace_vol'    => '7',
     ];
     foreach ($defaults as $k => $v) {
         $st = $db->prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)");
@@ -145,6 +149,9 @@ function db_init() {
     $addcol('orders', 'panel_email', "TEXT DEFAULT ''");
     $addcol('orders', 'panel_sub_id', "TEXT DEFAULT ''");
     $addcol('orders', 'renew_of', "INTEGER DEFAULT 0");
+    $addcol('orders', 'warn_time_at', "TEXT DEFAULT ''");
+    $addcol('orders', 'warn_vol_at', "TEXT DEFAULT ''");
+    $addcol('orders', 'depleted_at', "TEXT DEFAULT ''");
 }
 
 /* ---------- تنظیمات ---------- */

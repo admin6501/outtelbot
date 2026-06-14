@@ -118,6 +118,12 @@ function panel_reset_client_traffic($inbound_id, $email) {
     return is_array($r) && !empty($r['success']);
 }
 
+/* حذف کلاینت از پنل (clientId = uuid برای vless/vmess و password برای trojan) */
+function panel_del_client($inbound_id, $secret) {
+    $r = panel_api('POST', '/panel/api/inbounds/' . (int)$inbound_id . '/delClient/' . rawurlencode($secret));
+    return is_array($r) && !empty($r['success']);
+}
+
 function panel_get_client_traffic($email) {
     $r = panel_api('GET', '/panel/api/inbounds/getClientTraffics/' . rawurlencode($email));
     if (is_array($r) && !empty($r['success']) && isset($r['obj'])) return $r['obj'];
@@ -389,4 +395,82 @@ function panel_renew_client($orig, $plan) {
     $subUrl = trim(setting('panel_sub_url', ''));
     if ($subUrl !== '') return rtrim($subUrl, '/') . '/' . $subId;
     return panel_build_link($inbound, $secret, $email);
+}
+
+/* ===================================================================
+ *  کرون: هشدار انقضا/اتمام حجم و حذف خودکار سرویس‌های منقضی
+ *  - کانفیگ‌های زمان‌دار: del_grace_time روز بعد از انقضا حذف می‌شوند
+ *  - کانفیگ‌های فقط‌حجمی: del_grace_vol روز بعد از اتمام حجم حذف می‌شوند
+ *  - هشدار وقتی warn_days روز یا warn_gb گیگ باقی مانده باشد
+ * =================================================================== */
+function run_expiry_cron() {
+    if (setting('panel_url', '') === '') return;
+    $GB = 1073741824;
+    $warnDays  = (int)setting('warn_days', '2');
+    $warnBytes = (int)round((float)setting('warn_gb', '1') * $GB);
+    $graceTime = (int)setting('del_grace_time', '1');
+    $graceVol  = (int)setting('del_grace_vol', '7');
+    $nowMs = time() * 1000;
+
+    $orders = db()->query("SELECT * FROM orders WHERE status='delivered' AND panel_inbound>0 AND panel_email!='' AND panel_client_id!=''")->fetchAll();
+    foreach ($orders as $o) {
+        $live = panel_get_client_traffic($o['panel_email']);
+        if (!is_array($live)) continue;
+        $used  = (int)($live['up'] ?? 0) + (int)($live['down'] ?? 0);
+        $total = (int)($live['total'] ?? 0);
+        $exp   = (int)($live['expiryTime'] ?? 0);
+        $timeBased = $exp > 0;
+
+        /* ---- حذف خودکار ---- */
+        if ($timeBased) {
+            if ($nowMs > $exp + $graceTime * 86400000) { cron_delete_order($o); continue; }
+        } elseif ($total > 0) {
+            if ($used >= $total) {
+                if (empty($o['depleted_at'])) {
+                    db()->prepare("UPDATE orders SET depleted_at=? WHERE id=?")->execute([now(), $o['id']]);
+                    $o['depleted_at'] = now();
+                } else {
+                    $depTs = strtotime($o['depleted_at']);
+                    if ($depTs && time() > $depTs + $graceVol * 86400) { cron_delete_order($o); continue; }
+                }
+            } elseif (!empty($o['depleted_at'])) {
+                db()->prepare("UPDATE orders SET depleted_at='' WHERE id=?")->execute([$o['id']]);
+            }
+        }
+
+        /* ---- هشدار زمان (فقط برای کانفیگ‌های زمان‌دار) ---- */
+        if ($timeBased && empty($o['warn_time_at'])) {
+            $daysLeft = ($exp - $nowMs) / 86400000;
+            if ($daysLeft > 0 && $daysLeft <= $warnDays) {
+                cron_warn($o, 'time', (int)ceil($daysLeft), null);
+                db()->prepare("UPDATE orders SET warn_time_at=? WHERE id=?")->execute([now(), $o['id']]);
+            }
+        }
+
+        /* ---- هشدار حجم (هر زمان که سقف حجم تعریف شده باشد) ---- */
+        if ($total > 0 && empty($o['warn_vol_at'])) {
+            $remain = $total - $used;
+            if ($remain > 0 && $remain <= $warnBytes) {
+                cron_warn($o, 'vol', null, $remain);
+                db()->prepare("UPDATE orders SET warn_vol_at=? WHERE id=?")->execute([now(), $o['id']]);
+            }
+        }
+    }
+}
+
+function cron_delete_order($o) {
+    panel_del_client((int)$o['panel_inbound'], $o['panel_client_id']);
+    db()->prepare("UPDATE orders SET status='expired', updated_at=? WHERE id=?")->execute([now(), $o['id']]);
+    send($o['user_tg'],
+        "⛔️ <b>سرویس شما منقضی شد</b>\n\n🧾 سفارش #{$o['id']}\n📦 {$o['plan_title']}\n\nسرویس شما به پایان رسید و از سرور حذف شد.\nبرای ادامه می‌توانید سرویس جدید تهیه کنید یا تمدید نمایید.",
+        inline([[btn('🔄 تمدید / خرید مجدد', 'renew:' . $o['id'])]]));
+}
+
+function cron_warn($o, $type, $days, $remainBytes) {
+    if ($type === 'time') {
+        $msg = "⚠️ <b>هشدار نزدیک شدن به پایان سرویس</b>\n\n🧾 سفارش #{$o['id']}\n📦 {$o['plan_title']}\n\n⏳ تنها <b>{$days} روز</b> تا پایان سرویس شما باقی مانده است.\nبرای جلوگیری از قطع شدن، سرویس خود را تمدید کنید.";
+    } else {
+        $msg = "⚠️ <b>هشدار اتمام حجم سرویس</b>\n\n🧾 سفارش #{$o['id']}\n📦 {$o['plan_title']}\n\n📉 تنها <b>" . bytes_human($remainBytes) . "</b> از حجم سرویس شما باقی مانده است.\nبرای جلوگیری از قطع شدن، سرویس خود را تمدید کنید.";
+    }
+    send($o['user_tg'], $msg, inline([[btn('🔄 تمدید سرویس', 'renew:' . $o['id'])]]));
 }

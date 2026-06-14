@@ -136,6 +136,19 @@ setup_ssl() {
   fi
 }
 
+# ---------- نصب کرون (هشدار/حذف خودکار سرویس‌ها) ----------
+setup_cron() {
+  msg "تنظیم کرون برای هشدار و حذف خودکار سرویس‌ها..."
+  local cron_line="0 * * * * php ${BOT_DIR}/cron.php >> ${BOT_DIR}/data/cron.log 2>&1"
+  # حذف خطوط کرون قبلی این ربات و افزودن خط جدید (هر ساعت یک‌بار)
+  ( crontab -u www-data -l 2>/dev/null | grep -v "${BOT_DIR}/cron.php" ; echo "$cron_line" ) | crontab -u www-data -
+  if [[ $? -eq 0 ]]; then
+    ok "کرون هر ساعت یک‌بار اجرا می‌شود."
+  else
+    warn "تنظیم کرون ناموفق بود. می‌توانید دستی اضافه کنید: $cron_line"
+  fi
+}
+
 # ---------- ست کردن وبهوک ----------
 set_webhook() {
   msg "ثبت وبهوک تلگرام..."
@@ -216,6 +229,7 @@ do_install() {
   ok "وب‌سرور Nginx پیکربندی شد."
   setup_ssl
   set_webhook
+  setup_cron
 
   line
   ok "نصب کامل شد!"

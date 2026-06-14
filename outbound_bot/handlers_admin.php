@@ -235,7 +235,7 @@ function deliver_order($oid, $config_text, $renew = false) {
     $st->execute([$oid]); $o = $st->fetch();
     if (!$o) return;
     $was_delivered = ($o['status'] === 'delivered');
-    db()->prepare("UPDATE orders SET status='delivered', config_text=?, updated_at=? WHERE id=?")
+    db()->prepare("UPDATE orders SET status='delivered', config_text=?, warn_time_at='', warn_vol_at='', depleted_at='', updated_at=? WHERE id=?")
         ->execute([$config_text, now(), $oid]);
     if ($was_delivered) {
         send($o['user_tg'], "🔄 <b>اوت‌باند سفارش #{$oid} به‌روزرسانی شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند جدید شما:\n\n{$config_text}");
@@ -384,6 +384,7 @@ function admin_handle_callback($cb, $u) {
 
         /* تنظیمات */
         case 'a_settings': admin_settings($chat, $mid); break;
+        case 'a_expiry': admin_expiry_config($chat, $mid); break;
         case 'a_set':
             $key = $p1;
             $labels = [
@@ -394,6 +395,10 @@ function admin_handle_callback($cb, $u) {
                 'panel_user' => 'یوزرنیم پنل', 'panel_pass' => 'پسورد پنل',
                 'panel_address' => 'آدرس/دامنه سرور برای لینک کانفیگ (مثل dns یا IP)',
                 'panel_sub_url' => 'آدرس Subscription (اختیاری، مثل https://host:2096/sub)',
+                'warn_days' => 'تعداد روز باقی‌مانده برای هشدار انقضا (عدد)',
+                'warn_gb' => 'مقدار گیگ باقی‌مانده برای هشدار حجم (عدد، می‌تواند اعشاری باشد)',
+                'del_grace_time' => 'مهلت حذف کانفیگ زمان‌دار پس از انقضا (روز)',
+                'del_grace_vol' => 'مهلت حذف کانفیگ فقط‌حجمی پس از اتمام حجم (روز)',
             ];
             set_step($tg, 'admin_set_setting'); set_temp($tg, ['key' => $key]);
             edit($chat, $mid, "✏️ مقدار جدید برای «" . ($labels[$key] ?? $key) . "» را وارد کنید:\n/cancel برای لغو");
@@ -702,8 +707,25 @@ function admin_settings($chat, $mid = null) {
         [btn('📢 کانال جوین', 'a_set:channel_username'), btn($join ? '🔴 خاموش‌کردن جوین' : '🟢 روشن‌کردن جوین', 'a_toggle_join')],
         [btn($card ? '🔴 خاموش‌کردن کارت‌به‌کارت' : '🟢 روشن‌کردن کارت‌به‌کارت', 'a_toggle_card')],
         [btn('🔌 اتصال پنل 3x-ui (تحویل خودکار)', 'a_panel')],
+        [btn('⏰ هشدار و انقضای خودکار', 'a_expiry')],
         [btn('📝 متن خوش‌آمد', 'a_set:welcome_text')],
         [btn('🔙 بازگشت', 'a_back')],
+    ];
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+function admin_expiry_config($chat, $mid = null) {
+    $t = "⏰ <b>هشدار و انقضای خودکار</b>\n\n"
+       . "🔔 هشدار زمان: وقتی <b>" . setting('warn_days', '2') . " روز</b> به پایان مانده باشد\n"
+       . "🔔 هشدار حجم: وقتی <b>" . setting('warn_gb', '1') . " گیگ</b> حجم باقی مانده باشد\n\n"
+       . "🗑 حذف کانفیگ‌های زمان‌دار: <b>" . setting('del_grace_time', '1') . " روز</b> پس از انقضا\n"
+       . "🗑 حذف کانفیگ‌های فقط‌حجمی: <b>" . setting('del_grace_vol', '7') . " روز</b> پس از اتمام حجم\n\n"
+       . "ℹ️ این بررسی به‌صورت زمان‌بندی‌شده (کرون) اجرا می‌شود. کانفیگ‌های فقط‌حجمی (بدون زمان) فقط هشدار حجم دریافت می‌کنند.";
+    $kb = [
+        [btn('🔔 روز هشدار', 'a_set:warn_days'), btn('🔔 گیگ هشدار', 'a_set:warn_gb')],
+        [btn('🗑 مهلت حذف (زمان‌دار)', 'a_set:del_grace_time')],
+        [btn('🗑 مهلت حذف (فقط‌حجمی)', 'a_set:del_grace_vol')],
+        [btn('🔙 بازگشت', 'a_settings')],
     ];
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
