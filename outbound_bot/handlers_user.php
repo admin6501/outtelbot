@@ -153,13 +153,15 @@ function create_order($tg, $plan, $method) {
     $temp = get_temp($tg);
     $code = ($temp['plan_id'] ?? null) == $plan['id'] ? ($temp['discount'] ?? null) : null;
     list($final, $off, $valid) = apply_discount($plan['price'], $code);
+    $title = $plan['title'];
+    if (!empty($temp['renew_of'])) $title .= ' (تمدید #' . $temp['renew_of'] . ')';
     $st = db()->prepare("INSERT INTO orders(user_tg, plan_id, plan_title, price, status, payment_method, discount_code, created_at, updated_at)
         VALUES(?,?,?,?,?,?,?,?,?)");
     $status = $method === 'wallet' ? 'paid' : 'awaiting_receipt';
-    $st->execute([$tg, $plan['id'], $plan['title'], $final, $status, $method, $valid, now(), now()]);
+    $st->execute([$tg, $plan['id'], $title, $final, $status, $method, $valid, now(), now()]);
     $oid = db()->lastInsertId();
     if ($valid) db()->prepare("UPDATE discount_codes SET used_count=used_count+1 WHERE code=?")->execute([$valid]);
-    // پاک کردن کد تخفیف از temp
+    // پاک کردن کد تخفیف/علامت تمدید از temp
     set_temp($tg, []);
     return [$oid, $final];
 }
@@ -336,11 +338,37 @@ function show_my_order_detail($chat, $mid, $tg, $oid) {
     $kb = [];
     $plan = get_plan($o['plan_id']);
     if ($plan && $plan['is_active']) {
-        $kb[] = [btn('🔄 تمدید / خرید مجدد همین پلن', 'plan:' . $o['plan_id'])];
+        $kb[] = [btn('🔄 تمدید این سفارش', 'renew:' . $o['id'])];
     } else {
         $kb[] = [btn('🛒 مشاهده پلن‌های موجود', 'buy_home')];
     }
     $kb[] = [btn('🔙 بازگشت به سفارش‌ها', 'myorders_home')];
+    edit($chat, $mid, $t, inline($kb));
+}
+
+/* تمدید مستقیم همان پلن (بدون عبور از مراحل انتخاب دسته/لوکیشن/پلن) */
+function show_renew($chat, $mid, $tg, $oid) {
+    $st = db()->prepare("SELECT * FROM orders WHERE id=? AND user_tg=?");
+    $st->execute([$oid, $tg]);
+    $o = $st->fetch();
+    if (!$o) { edit($chat, $mid, "❌ سفارش یافت نشد."); return; }
+    $p = get_plan($o['plan_id']);
+    if (!$p || !$p['is_active']) {
+        edit($chat, $mid, "❌ متأسفانه این پلن دیگر فعال نیست و امکان تمدید وجود ندارد.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
+        return;
+    }
+    $u = get_user($tg);
+    set_temp($tg, ['renew_of' => $oid]); // علامت‌گذاری تمدید + پاک‌سازی کد تخفیف قبلی
+    $t = "🔄 <b>تمدید سفارش #{$oid}</b>\n\n"
+       . "📦 پلن: {$p['title']}\n"
+       . "💰 مبلغ تمدید: <b>" . fmt($p['price']) . "</b> تومان\n"
+       . "👛 موجودی کیف پول: " . fmt($u['balance']) . " تومان\n\n"
+       . "روش پرداخت را برای تمدید انتخاب کنید:";
+    $kb = [
+        [btn('👛 پرداخت از کیف پول', 'pw:' . $p['id'])],
+        [btn('💳 کارت به کارت', 'pc:' . $p['id'])],
+        [btn('🔙 بازگشت به سفارش', 'myorder:' . $oid)],
+    ];
     edit($chat, $mid, $t, inline($kb));
 }
 
@@ -406,6 +434,7 @@ function user_handle_callback($cb, $u) {
         case 'dc':       start_discount($chat, $mid, $tg, $parts[1]); break;
         case 'myorders_home': show_my_orders($chat, $tg, $mid); break;
         case 'myorder':  show_my_order_detail($chat, $mid, $tg, $parts[1]); break;
+        case 'renew':    show_renew($chat, $mid, $tg, $parts[1]); break;
         case 'wallet_home':   show_wallet($chat, get_user($tg), $mid); break;
         case 'wallet_charge': start_charge($chat, $mid, $tg); break;
         case 'wallet_tx':     show_transactions($chat, $mid, $tg); break;
