@@ -82,6 +82,7 @@ function show_categories($chat, $mid = null) {
     }
     $kb = [];
     foreach ($rows as $r) $kb[] = [btn('🗂 ' . $r['name'], 'cat:' . $r['id'])];
+    $kb[] = [btn('❌ بستن', 'close')];
     $t = "🛒 <b>یک دسته‌بندی را انتخاب کنید:</b>";
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
@@ -199,7 +200,7 @@ function pay_card_to_card($chat, $mid, $tg, $plan_id) {
        . "👤 به نام: " . setting('card_holder') . "\n\n"
        . "🧾 شماره سفارش: #{$oid}\n\n"
        . "📷 پس از واریز، <b>تصویر رسید</b> را همینجا ارسال کنید.";
-    edit($chat, $mid, $t);
+    edit($chat, $mid, $t, inline([[btn('❌ لغو سفارش', 'pcancel:' . $oid)]]));
 }
 
 function handle_order_receipt($tg, $chat, $file_id) {
@@ -245,7 +246,7 @@ function handle_charge_amount($tg, $chat, $text) {
     $pid = db()->lastInsertId();
     set_step($tg, 'charge_receipt');
     set_temp($tg, ['payment_id' => $pid]);
-    send($chat, "💳 لطفاً مبلغ <b>" . fmt($amount) . "</b> تومان را به کارت زیر واریز کنید:\n\n💳 <code>" . setting('card_number') . "</code>\n👤 " . setting('card_holder') . "\n\n📷 سپس تصویر رسید را ارسال کنید.");
+    send($chat, "💳 لطفاً مبلغ <b>" . fmt($amount) . "</b> تومان را به کارت زیر واریز کنید:\n\n💳 <code>" . setting('card_number') . "</code>\n👤 " . setting('card_holder') . "\n\n📷 سپس تصویر رسید را ارسال کنید.", inline([[btn('❌ لغو شارژ', 'chcancel:' . $pid)]]));
 }
 function handle_charge_receipt($tg, $chat, $file_id) {
     $temp = get_temp($tg);
@@ -438,5 +439,33 @@ function user_handle_callback($cb, $u) {
         case 'wallet_home':   show_wallet($chat, get_user($tg), $mid); break;
         case 'wallet_charge': start_charge($chat, $mid, $tg); break;
         case 'wallet_tx':     show_transactions($chat, $mid, $tg); break;
+        case 'pcancel':  user_cancel_pending_order($chat, $mid, $tg, $parts[1]); break;
+        case 'chcancel': user_cancel_pending_charge($chat, $mid, $tg, $parts[1]); break;
+        case 'close':    tg('deleteMessage', ['chat_id' => $chat, 'message_id' => $mid]); break;
     }
+}
+
+/* لغو سفارش پرداخت‌نشده (کارت‌به‌کارت) توسط کاربر */
+function user_cancel_pending_order($chat, $mid, $tg, $oid) {
+    $st = db()->prepare("SELECT * FROM orders WHERE id=? AND user_tg=?");
+    $st->execute([$oid, $tg]);
+    $o = $st->fetch();
+    if ($o && $o['status'] === 'awaiting_receipt') {
+        if ($o['discount_code']) db()->prepare("UPDATE discount_codes SET used_count=max(0,used_count-1) WHERE code=?")->execute([$o['discount_code']]);
+        db()->prepare("DELETE FROM orders WHERE id=?")->execute([$oid]);
+    }
+    set_step($tg, ''); set_temp($tg, []);
+    edit($chat, $mid, "❌ سفارش لغو شد و عملیات پرداخت متوقف شد.", inline([[btn('🛒 خرید دوباره', 'buy_home')]]));
+}
+
+/* لغو شارژ پرداخت‌نشده توسط کاربر */
+function user_cancel_pending_charge($chat, $mid, $tg, $pid) {
+    $st = db()->prepare("SELECT * FROM payments WHERE id=? AND user_tg=?");
+    $st->execute([$pid, $tg]);
+    $p = $st->fetch();
+    if ($p && $p['status'] === 'awaiting_receipt') {
+        db()->prepare("DELETE FROM payments WHERE id=?")->execute([$pid]);
+    }
+    set_step($tg, ''); set_temp($tg, []);
+    edit($chat, $mid, "❌ عملیات شارژ کیف پول لغو شد.", inline([[btn('👛 کیف پول', 'wallet_home')]]));
 }
