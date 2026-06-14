@@ -116,7 +116,7 @@ function show_plan_detail($chat, $mid, $tg, $plan_id) {
     if (!$p || !$p['is_active']) { edit($chat, $mid, "❌ این پلن دیگر موجود نیست."); return; }
     $temp = get_temp($tg);
     $code = ($temp['plan_id'] ?? null) == $plan_id ? ($temp['discount'] ?? null) : null;
-    list($final, $off, $valid) = apply_discount($p['price'], $code);
+    list($final, $off, $valid) = apply_discount($p['price'], $code, $plan_id);
 
     $t  = "📦 <b>{$p['title']}</b>\n\n";
     if ($p['description']) $t .= $p['description'] . "\n\n";
@@ -139,12 +139,30 @@ function show_payment_options($chat, $mid, $tg, $plan_id) {
     $u = get_user($tg);
     $temp = get_temp($tg);
     $code = ($temp['plan_id'] ?? null) == $plan_id ? ($temp['discount'] ?? null) : null;
-    list($final) = apply_discount($p['price'], $code);
+    list($final) = apply_discount($p['price'], $code, $plan_id);
 
     $t = "💳 <b>روش پرداخت را انتخاب کنید</b>\n\nمبلغ قابل پرداخت: <b>" . fmt($final) . "</b> تومان\nموجودی کیف پول شما: " . fmt($u['balance']) . " تومان";
+    $kb = [];
+    $kb[] = [btn('👛 پرداخت از کیف پول', 'pw:' . $plan_id)];
+    if (setting('card_enabled', '1') === '1') {
+        $kb[] = [btn('💳 کارت به کارت', 'pc:' . $plan_id)];
+    } else {
+        $kb[] = [btn('☎️ پرداخت از طریق پشتیبانی', 'paysupport:' . $plan_id)];
+    }
+    $kb[] = [btn('🔙 بازگشت', 'plan:' . $plan_id)];
+    edit($chat, $mid, $t, inline($kb));
+}
+
+function pay_support($chat, $mid, $tg, $plan_id) {
+    $p = get_plan($plan_id);
+    if (!$p) return;
+    $temp = get_temp($tg);
+    $code = ($temp['plan_id'] ?? null) == $plan_id ? ($temp['discount'] ?? null) : null;
+    list($final) = apply_discount($p['price'], $code, $plan_id);
+    $s = ltrim(setting('support_username', ''), '@');
+    $t = "☎️ <b>پرداخت از طریق پشتیبانی</b>\n\n📦 پلن: {$p['title']}\n💰 مبلغ: <b>" . fmt($final) . "</b> تومان\n\nبرای ثبت و پرداخت این سفارش، لطفاً به پشتیبانی پیام دهید و نام پلن و مبلغ بالا را اعلام کنید:\n@{$s}";
     $kb = [
-        [btn('👛 پرداخت از کیف پول', 'pw:' . $plan_id)],
-        [btn('💳 کارت به کارت', 'pc:' . $plan_id)],
+        [url_btn('💬 پیام به پشتیبانی', 'https://t.me/' . $s)],
         [btn('🔙 بازگشت', 'plan:' . $plan_id)],
     ];
     edit($chat, $mid, $t, inline($kb));
@@ -153,7 +171,7 @@ function show_payment_options($chat, $mid, $tg, $plan_id) {
 function create_order($tg, $plan, $method) {
     $temp = get_temp($tg);
     $code = ($temp['plan_id'] ?? null) == $plan['id'] ? ($temp['discount'] ?? null) : null;
-    list($final, $off, $valid) = apply_discount($plan['price'], $code);
+    list($final, $off, $valid) = apply_discount($plan['price'], $code, $plan['id']);
     $title = $plan['title'];
     if (!empty($temp['renew_of'])) $title .= ' (تمدید #' . $temp['renew_of'] . ')';
     $st = db()->prepare("INSERT INTO orders(user_tg, plan_id, plan_title, price, status, payment_method, discount_code, created_at, updated_at)
@@ -173,7 +191,7 @@ function pay_with_wallet($chat, $mid, $tg, $plan_id) {
     $u = get_user($tg);
     $temp = get_temp($tg);
     $code = ($temp['plan_id'] ?? null) == $plan_id ? ($temp['discount'] ?? null) : null;
-    list($final) = apply_discount($p['price'], $code);
+    list($final) = apply_discount($p['price'], $code, $plan_id);
     if ($u['balance'] < $final) {
         edit($chat, $mid, "❌ موجودی کیف پول شما کافی نیست.\nموجودی: " . fmt($u['balance']) . " تومان\nمبلغ لازم: " . fmt($final) . " تومان",
             inline([[btn('➕ شارژ کیف پول', 'wallet_charge')], [btn('🔙 بازگشت', 'plan:' . $plan_id)]]));
@@ -191,6 +209,7 @@ function pay_with_wallet($chat, $mid, $tg, $plan_id) {
 function pay_card_to_card($chat, $mid, $tg, $plan_id) {
     $p = get_plan($plan_id);
     if (!$p || !$p['is_active']) { edit($chat, $mid, "❌ این پلن موجود نیست."); return; }
+    if (setting('card_enabled', '1') !== '1') { pay_support($chat, $mid, $tg, $plan_id); return; }
     list($oid, $final) = create_order($tg, $p, 'card');
     set_step($tg, 'order_receipt');
     set_temp($tg, ['order_id' => $oid]);
@@ -293,7 +312,7 @@ function handle_discount_input($tg, $chat, $text) {
     $plan_id = $temp['plan_id'] ?? 0;
     $p = get_plan($plan_id);
     if (!$p) { set_step($tg, ''); send($chat, "❌ پلن یافت نشد.", main_menu_kb($tg)); return; }
-    list($final, $off, $valid) = apply_discount($p['price'], trim($text));
+    list($final, $off, $valid) = apply_discount($p['price'], trim($text), $plan_id);
     set_step($tg, '');
     if (!$valid) {
         set_temp($tg, ['plan_id' => $plan_id]);
@@ -433,6 +452,7 @@ function user_handle_callback($cb, $u) {
         case 'buyplan':  show_payment_options($chat, $mid, $tg, $parts[1]); break;
         case 'pw':       pay_with_wallet($chat, $mid, $tg, $parts[1]); break;
         case 'pc':       pay_card_to_card($chat, $mid, $tg, $parts[1]); break;
+        case 'paysupport': pay_support($chat, $mid, $tg, $parts[1]); break;
         case 'dc':       start_discount($chat, $mid, $tg, $parts[1]); break;
         case 'myorders_home': show_my_orders($chat, $tg, $mid); break;
         case 'myorder':  show_my_order_detail($chat, $mid, $tg, $parts[1]); break;

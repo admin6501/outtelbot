@@ -113,12 +113,21 @@ function db_init() {
         'referral_enabled' => '1',
         'referral_percent' => '10',
         'min_charge'       => '50000',
+        'card_enabled'     => '1',
         'welcome_text'     => "🌐 به ربات فروش اوت‌باند خوش آمدید!\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
         'bot_username'     => '',
     ];
     foreach ($defaults as $k => $v) {
         $st = $db->prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)");
         $st->execute([$k, $v]);
+    }
+
+    // مهاجرت: افزودن ستون plan_ids به کدهای تخفیف (برای کد تخفیف مخصوص پلن خاص)
+    $cols = $db->query("PRAGMA table_info(discount_codes)")->fetchAll();
+    $has_plan_ids = false;
+    foreach ($cols as $c) { if ($c['name'] === 'plan_ids') $has_plan_ids = true; }
+    if (!$has_plan_ids) {
+        $db->exec("ALTER TABLE discount_codes ADD COLUMN plan_ids TEXT DEFAULT ''");
     }
 }
 
@@ -296,7 +305,7 @@ function status_label($s) {
     ];
     return $map[$s] ?? $s;
 }
-function apply_discount($price, $code) {
+function apply_discount($price, $code, $plan_id = null) {
     if (!$code) return [$price, 0, null];
     $st = db()->prepare("SELECT * FROM discount_codes WHERE code=? AND is_active=1");
     $st->execute([$code]);
@@ -304,6 +313,12 @@ function apply_discount($price, $code) {
     if (!$d) return [$price, 0, null];
     if ($d['max_uses'] > 0 && $d['used_count'] >= $d['max_uses']) return [$price, 0, null];
     if ($d['expire_at'] && strtotime($d['expire_at']) < time()) return [$price, 0, null];
+    // محدودیت پلن: اگر plan_ids تعیین شده باشد، فقط برای همان پلن‌ها معتبر است
+    $allowed = trim($d['plan_ids'] ?? '');
+    if ($allowed !== '') {
+        $ids = array_filter(array_map('intval', explode(',', $allowed)));
+        if ($plan_id === null || !in_array((int)$plan_id, $ids, true)) return [$price, 0, null];
+    }
     $off = $d['type'] === 'percent' ? round($price * $d['value'] / 100) : $d['value'];
     if ($off > $price) $off = $price;
     return [$price - $off, $off, $d['code']];

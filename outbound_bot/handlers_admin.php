@@ -109,17 +109,20 @@ function admin_handle_message($msg, $u) {
             break;
 
         case 'admin_dc_add':
-            // فرمت: CODE|percent|20|100|2025-12-30
+            // فرمت: CODE|نوع|مقدار|حداکثر|تاریخ انقضا|آیدی پلن‌ها
             $a = array_map('trim', explode('|', $text));
             if (count($a) < 3) { send($chat, "❌ فرمت اشتباه است. مثال:\n<code>OFF20|percent|20|100</code>"); break; }
             $code = strtoupper($a[0]); $type = $a[1]; $val = (float)$a[2];
             $max = isset($a[3]) ? (int)$a[3] : 0;
             $exp = $a[4] ?? '';
+            $plan_ids = isset($a[5]) ? preg_replace('/[^0-9,]/', '', $a[5]) : '';
+            $plan_ids = trim($plan_ids, ', ');
             if (!in_array($type, ['percent', 'amount'])) { send($chat, "❌ نوع باید percent یا amount باشد."); break; }
             try {
-                db()->prepare("INSERT INTO discount_codes(code,type,value,max_uses,expire_at,created_at) VALUES(?,?,?,?,?,?)")
-                    ->execute([$code, $type, $val, $max, $exp, now()]);
-                set_step($tg, ''); send($chat, "✅ کد تخفیف «{$code}» ساخته شد."); admin_list_dcs($chat);
+                db()->prepare("INSERT INTO discount_codes(code,type,value,max_uses,expire_at,plan_ids,created_at) VALUES(?,?,?,?,?,?,?)")
+                    ->execute([$code, $type, $val, $max, $exp, $plan_ids, now()]);
+                $scope = $plan_ids === '' ? 'همه پلن‌ها' : 'پلن‌های: ' . $plan_ids;
+                set_step($tg, ''); send($chat, "✅ کد تخفیف «{$code}» ساخته شد.\n🎯 محدوده: {$scope}"); admin_list_dcs($chat);
             } catch (Exception $e) { send($chat, "❌ این کد قبلاً وجود دارد."); }
             break;
 
@@ -310,7 +313,7 @@ function admin_handle_callback($cb, $u) {
 
         /* کد تخفیف */
         case 'a_dcs': admin_list_dcs($chat, $mid); break;
-        case 'a_dc_add': set_step($tg, 'admin_dc_add'); edit($chat, $mid, "🎟 کد تخفیف جدید را به صورت زیر وارد کنید:\n<code>کد|نوع|مقدار|حداکثر استفاده|تاریخ انقضا</code>\n\nنوع: percent یا amount\nمثال درصدی: <code>OFF20|percent|20|100</code>\nمثال مبلغی: <code>SALE|amount|15000|0|2025-12-30</code>\n(حداکثر استفاده 0 = نامحدود)\n/cancel برای لغو"); break;
+        case 'a_dc_add': set_step($tg, 'admin_dc_add'); edit($chat, $mid, "🎟 کد تخفیف جدید را به صورت زیر وارد کنید:\n<code>کد|نوع|مقدار|حداکثر|تاریخ انقضا|آیدی پلن‌ها</code>\n\nنوع: percent یا amount\n• حداکثر استفاده: 0 = نامحدود\n• تاریخ انقضا: اختیاری (YYYY-MM-DD)\n• آیدی پلن‌ها: اختیاری — اگر خالی باشد برای <b>همه پلن‌ها</b>، در غیر این صورت فقط برای پلن‌های مشخص‌شده (با کاما)\n\nمثال همه پلن‌ها: <code>OFF20|percent|20|100</code>\nمثال یک پلن: <code>VIP10|percent|10|0||3</code>\nمثال چند پلن: <code>SALE|amount|15000|0|2025-12-30|3,5,8</code>\n\nℹ️ آیدی پلن‌ها در بخش «📦 پلن‌ها» کنار هر پلن نمایش داده می‌شود.\n/cancel برای لغو"); break;
         case 'a_dc_tg': db()->prepare("UPDATE discount_codes SET is_active=1-is_active WHERE id=?")->execute([$p1]); admin_list_dcs($chat, $mid); break;
         case 'a_dc_del': db()->prepare("DELETE FROM discount_codes WHERE id=?")->execute([$p1]); admin_list_dcs($chat, $mid); break;
 
@@ -343,6 +346,7 @@ function admin_handle_callback($cb, $u) {
             edit($chat, $mid, "✏️ مقدار جدید برای «" . ($labels[$key] ?? $key) . "» را وارد کنید:\n/cancel برای لغو");
             break;
         case 'a_toggle_join': set_setting('forced_join', setting('forced_join') === '1' ? '0' : '1'); admin_settings($chat, $mid); break;
+        case 'a_toggle_card': set_setting('card_enabled', setting('card_enabled') === '1' ? '0' : '1'); admin_settings($chat, $mid); break;
     }
 }
 
@@ -398,11 +402,11 @@ function admin_list_plans($chat, $mid = null) {
     $kb = [[btn('➕ افزودن پلن', 'a_plan_add')]];
     foreach ($rows as $r) {
         $st = $r['is_active'] ? '🟢' : '🔴';
-        $label = "{$st} {$r['title']} | {$r['cat']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
+        $label = "{$st} #{$r['id']} {$r['title']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
         $kb[] = [btn(mb_substr($label, 0, 60), 'a_plan_tg:' . $r['id']), btn('🗑', 'a_plan_del:' . $r['id'])];
     }
     $kb[] = [btn('🔙 بازگشت', 'a_back')];
-    $t = "📦 <b>مدیریت پلن‌ها</b>\nروی پلن بزنید تا فعال/غیرفعال شود.";
+    $t = "📦 <b>مدیریت پلن‌ها</b>\nروی پلن بزنید تا فعال/غیرفعال شود.\nℹ️ عدد بعد از # آیدی پلن است (برای کد تخفیف مخصوص پلن).";
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 function admin_plan_pick_cat($chat, $mid) {
@@ -528,10 +532,11 @@ function admin_list_dcs($chat, $mid = null) {
     foreach ($rows as $r) {
         $st = $r['is_active'] ? '🟢' : '🔴';
         $v = $r['type'] === 'percent' ? $r['value'] . '%' : fmt($r['value']) . 'ت';
-        $kb[] = [btn("{$st} {$r['code']} ({$v}) {$r['used_count']}/" . ($r['max_uses'] ?: '∞'), 'a_dc_tg:' . $r['id']), btn('🗑', 'a_dc_del:' . $r['id'])];
+        $scope = trim($r['plan_ids'] ?? '') === '' ? '' : ' 🎯[' . $r['plan_ids'] . ']';
+        $kb[] = [btn("{$st} {$r['code']} ({$v}){$scope} {$r['used_count']}/" . ($r['max_uses'] ?: '∞'), 'a_dc_tg:' . $r['id']), btn('🗑', 'a_dc_del:' . $r['id'])];
     }
     $kb[] = [btn('🔙 بازگشت', 'a_back')];
-    $t = "🎟 <b>مدیریت کدهای تخفیف</b>";
+    $t = "🎟 <b>مدیریت کدهای تخفیف</b>\n🎯[..] = مخصوص پلن‌های مشخص (آیدی پلن).";
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 
@@ -593,17 +598,20 @@ function admin_ref($chat, $mid = null) {
 /* ---------- تنظیمات ---------- */
 function admin_settings($chat, $mid = null) {
     $join = setting('forced_join', '0') === '1';
+    $card = setting('card_enabled', '1') === '1';
     $t = "⚙️ <b>تنظیمات ربات</b>\n\n"
        . "💳 شماره کارت: <code>" . setting('card_number') . "</code>\n"
        . "👤 صاحب کارت: " . setting('card_holder') . "\n"
        . "☎️ پشتیبانی: @" . setting('support_username') . "\n"
        . "📢 کانال جوین: " . (setting('channel_username') ? '@' . setting('channel_username') : '—') . "\n"
        . "🔒 جوین اجباری: " . ($join ? '🟢 فعال' : '🔴 غیرفعال') . "\n"
+       . "🏧 درگاه کارت‌به‌کارت: " . ($card ? '🟢 فعال' : '🔴 غیرفعال (پرداخت با پشتیبانی)') . "\n"
        . "💵 حداقل شارژ: " . fmt(setting('min_charge')) . " تومان";
     $kb = [
         [btn('💳 شماره کارت', 'a_set:card_number'), btn('👤 صاحب کارت', 'a_set:card_holder')],
         [btn('☎️ پشتیبانی', 'a_set:support_username'), btn('💵 حداقل شارژ', 'a_set:min_charge')],
         [btn('📢 کانال جوین', 'a_set:channel_username'), btn($join ? '🔴 خاموش‌کردن جوین' : '🟢 روشن‌کردن جوین', 'a_toggle_join')],
+        [btn($card ? '🔴 خاموش‌کردن کارت‌به‌کارت' : '🟢 روشن‌کردن کارت‌به‌کارت', 'a_toggle_card')],
         [btn('📝 متن خوش‌آمد', 'a_set:welcome_text')],
         [btn('🔙 بازگشت', 'a_back')],
     ];
