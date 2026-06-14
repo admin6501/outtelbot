@@ -114,6 +114,14 @@ function db_init() {
         'referral_percent' => '10',
         'min_charge'       => '50000',
         'card_enabled'     => '1',
+        'panel_url'        => '',
+        'panel_user'       => '',
+        'panel_pass'       => '',
+        'panel_address'    => '',
+        'panel_sub_url'    => '',
+        'panel_auto'       => '0',
+        'panel_cookie'     => '',
+        'panel_cookie_time'=> '0',
         'welcome_text'     => "🌐 به ربات فروش اوت‌باند خوش آمدید!\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
         'bot_username'     => '',
     ];
@@ -122,13 +130,16 @@ function db_init() {
         $st->execute([$k, $v]);
     }
 
-    // مهاجرت: افزودن ستون plan_ids به کدهای تخفیف (برای کد تخفیف مخصوص پلن خاص)
-    $cols = $db->query("PRAGMA table_info(discount_codes)")->fetchAll();
-    $has_plan_ids = false;
-    foreach ($cols as $c) { if ($c['name'] === 'plan_ids') $has_plan_ids = true; }
-    if (!$has_plan_ids) {
-        $db->exec("ALTER TABLE discount_codes ADD COLUMN plan_ids TEXT DEFAULT ''");
-    }
+    // مهاجرت ستون‌ها (افزودن ستون‌های جدید به جدول‌های موجود)
+    $addcol = function ($table, $col, $def) use ($db) {
+        $cols = $db->query("PRAGMA table_info($table)")->fetchAll();
+        foreach ($cols as $c) { if ($c['name'] === $col) return; }
+        $db->exec("ALTER TABLE $table ADD COLUMN $col $def");
+    };
+    $addcol('discount_codes', 'plan_ids', "TEXT DEFAULT ''");
+    $addcol('plans', 'inbound_id', "INTEGER DEFAULT 0");
+    $addcol('plans', 'traffic_gb', "INTEGER DEFAULT 0");
+    $addcol('plans', 'duration_days', "INTEGER DEFAULT 0");
 }
 
 /* ---------- تنظیمات ---------- */

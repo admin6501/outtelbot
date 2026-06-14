@@ -200,6 +200,11 @@ function pay_with_wallet($chat, $mid, $tg, $plan_id) {
     add_balance($tg, -$final);
     add_tx($tg, -$final, 'purchase', 'خرید پلن: ' . $p['title']);
     list($oid) = create_order($tg, $p, 'wallet');
+    // تلاش برای تحویل خودکار از پنل 3x-ui
+    if (try_auto_deliver($oid)) {
+        edit($chat, $mid, "✅ پرداخت انجام شد و اوت‌باند به‌صورت <b>خودکار</b> برای شما ارسال شد.\n\n🧾 شماره سفارش: <b>#{$oid}</b>\nاز بخش «📦 سفارش‌های من» هم قابل مشاهده است.");
+        return;
+    }
     edit($chat, $mid, "✅ پرداخت از کیف پول با موفقیت انجام شد.\n\n🧾 شماره سفارش: <b>#{$oid}</b>\n📦 اوت‌باند شما به‌صورت دستی توسط ادمین آماده و ارسال خواهد شد. لطفاً منتظر بمانید.");
     $un = $u['username'] ? '@' . $u['username'] : $tg;
     notify_admins("🆕 <b>سفارش جدید (پرداخت از کیف پول)</b>\n\n🧾 سفارش #{$oid}\n👤 کاربر: {$un}\n📦 پلن: {$p['title']}\n💰 مبلغ: " . fmt($final) . " تومان\n\nنیازمند ارسال کانفیگ ✍️",

@@ -7,7 +7,6 @@ require __DIR__ . '/config.php';
 require __DIR__ . '/bot.php';
 
 header('Content-Type: text/html; charset=utf-8');
-
 if (BOT_TOKEN === 'PUT_YOUR_BOT_TOKEN_HERE') {
     exit('<h3 style="color:red">⛔ ابتدا BOT_TOKEN را در فایل config.php تنظیم کنید.</h3>');
 }
