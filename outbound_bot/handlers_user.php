@@ -345,6 +345,7 @@ function show_my_orders($chat, $tg, $mid = null) {
             $kb[] = [btn("🧾 #{$r['id']} | {$r['plan_title']} | " . status_label($r['status']), 'myorder:' . $r['id'])];
         }
     }
+    $kb[] = [btn('🔙 بازگشت به منوی اصلی', 'close')];
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 

@@ -324,7 +324,8 @@ function status_label($s) {
         'pending_approval' => '🕓 در انتظار تایید پرداخت',
         'paid'             => '📦 در حال آماده‌سازی',
         'delivered'        => '✅ تحویل شده',
-        'rejected'         => '❌ رد شده',
+        'rejected'         => '❌ لغو شده',
+        'expired'          => '⛔️ منقضی شده',
     ];
     return $map[$s] ?? $s;
 }
