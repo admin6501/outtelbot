@@ -592,6 +592,10 @@ function admin_cancel_menu($chat, $mid, $oid) {
 function cancel_order($oid, $refund) {
     $st = db()->prepare("SELECT * FROM orders WHERE id=?"); $st->execute([$oid]); $o = $st->fetch();
     if (!$o || $o['status'] === 'rejected') return false;
+    // حذف کانفیگ از پنل 3x-ui در صورت وجود اتصال
+    if (function_exists('order_has_panel') && order_has_panel($o)) {
+        panel_del_client((int)$o['panel_inbound'], $o['panel_client_id']);
+    }
     db()->prepare("UPDATE orders SET status='rejected', updated_at=? WHERE id=?")->execute([now(), $oid]);
     $refund = max(0, (int)$refund);
     if ($refund > 0) {
