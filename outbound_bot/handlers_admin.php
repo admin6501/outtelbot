@@ -156,9 +156,13 @@ function admin_handle_message($msg, $u) {
 
         case 'admin_send_config':
             $oid = $temp['order_id'];
+            $prev = db()->prepare("SELECT status FROM orders WHERE id=?"); $prev->execute([$oid]); $prow = $prev->fetch();
+            $was = ($prow && $prow['status'] === 'delivered');
             deliver_order($oid, $msg['text'] ?? '');
             set_step($tg, ''); set_temp($tg, []);
-            send($chat, "✅ اوت‌باند برای کاربر ارسال شد و سفارش #{$oid} تحویل داده شد.");
+            send($chat, $was
+                ? "✅ اوت‌باند سفارش #{$oid} تغییر کرد و نسخه‌ی جدید برای کاربر ارسال شد."
+                : "✅ اوت‌باند برای کاربر ارسال شد و سفارش #{$oid} تحویل داده شد.");
             break;
 
         case 'admin_cancel_amount':
@@ -191,10 +195,15 @@ function deliver_order($oid, $config_text) {
     $st = db()->prepare("SELECT * FROM orders WHERE id=?");
     $st->execute([$oid]); $o = $st->fetch();
     if (!$o) return;
+    $was_delivered = ($o['status'] === 'delivered');
     db()->prepare("UPDATE orders SET status='delivered', config_text=?, updated_at=? WHERE id=?")
         ->execute([$config_text, now(), $oid]);
+    if ($was_delivered) {
+        send($o['user_tg'], "🔄 <b>اوت‌باند سفارش #{$oid} به‌روزرسانی شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند جدید شما:\n\n{$config_text}");
+        return; // ویرایش است؛ پاداش زیرمجموعه دوباره داده نمی‌شود
+    }
     send($o['user_tg'], "✅ <b>سفارش #{$oid} آماده شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند شما:\n\n{$config_text}");
-    // پاداش زیرمجموعه‌گیری
+    // پاداش زیرمجموعه‌گیری (فقط در تحویل اول)
     if (setting('referral_enabled', '1') === '1') {
         $buyer = get_user($o['user_tg']);
         if ($buyer && $buyer['referred_by']) {
@@ -258,7 +267,12 @@ function admin_handle_callback($cb, $u) {
             break;
         case 'a_osend':
             set_step($tg, 'admin_send_config'); set_temp($tg, ['order_id' => $p1]);
-            send($chat, "✍️ متن اوت‌باند/کانفیگ سفارش #{$p1} را ارسال کنید:\n/cancel برای لغو");
+            $st = db()->prepare("SELECT config_text, status FROM orders WHERE id=?"); $st->execute([$p1]); $oo = $st->fetch();
+            if ($oo && $oo['status'] === 'delivered' && $oo['config_text']) {
+                send($chat, "✏️ <b>تغییر اوت‌باند سفارش #{$p1}</b>\n\n🔻 اوت‌باند فعلی:\n{$oo['config_text']}\n\n👇 متن جدید اوت‌باند را ارسال کنید تا جایگزین شود و برای کاربر ارسال گردد:\n/cancel برای لغو");
+            } else {
+                send($chat, "✍️ متن اوت‌باند/کانفیگ سفارش #{$p1} را ارسال کنید:\n/cancel برای لغو");
+            }
             break;
         case 'a_ocancel': admin_cancel_menu($chat, $mid, $p1); break;
         case 'a_ocfull':
@@ -442,6 +456,9 @@ function admin_show_order($chat, $mid, $oid) {
     $usr = get_user($o['user_tg']);
     $un = $usr && $usr['username'] ? '@' . $usr['username'] : $o['user_tg'];
     $t = "🧾 <b>سفارش #{$o['id']}</b>\n👤 کاربر: {$un} ({$o['user_tg']})\n📦 پلن: {$o['plan_title']}\n💰 مبلغ: " . fmt($o['price']) . " تومان\n💳 روش: {$o['payment_method']}\n📌 وضعیت: " . status_label($o['status']) . "\n🕒 {$o['created_at']}";
+    if ($o['status'] === 'delivered' && $o['config_text']) {
+        $t .= "\n\n🔻 <b>اوت‌باند فعلی:</b>\n" . $o['config_text'];
+    }
     $kb = [];
     if ($o['status'] === 'pending_approval') {
         $kb[] = [btn('✅ تایید پرداخت', 'a_oappr:' . $oid)];
@@ -449,7 +466,7 @@ function admin_show_order($chat, $mid, $oid) {
     } elseif ($o['status'] === 'paid') {
         $kb[] = [btn('📤 ارسال کانفیگ', 'a_osend:' . $oid)];
     } elseif ($o['status'] === 'delivered') {
-        $kb[] = [btn('📤 ارسال مجدد کانفیگ', 'a_osend:' . $oid)];
+        $kb[] = [btn('✏️ تغییر اوت‌باند', 'a_osend:' . $oid)];
     }
     if ($o['status'] !== 'rejected') {
         $kb[] = [btn('🚫 لغو سفارش', 'a_ocancel:' . $oid)];
