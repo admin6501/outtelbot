@@ -124,6 +124,72 @@ function panel_get_client_traffic($email) {
     return null;
 }
 
+/* تبدیل بایت به فرمت خوانا */
+function bytes_human($b) {
+    $b = (float)$b;
+    if ($b <= 0) return '0 MB';
+    $u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    $i = (int)floor(log($b, 1024));
+    $i = max(0, min($i, count($u) - 1));
+    return round($b / pow(1024, $i), 2) . ' ' . $u[$i];
+}
+
+/* آیا سفارش به یک کلاینت روی پنل متصل است؟ */
+function order_has_panel($o) {
+    return (int)($o['panel_inbound'] ?? 0) > 0 && !empty($o['panel_email']) && !empty($o['panel_client_id']);
+}
+
+/* فعال/غیرفعال‌سازی کلاینت روی پنل (حجم و انقضا حفظ می‌شود) */
+function panel_set_client_enable($o, $enable) {
+    if (!order_has_panel($o)) return false;
+    $inbound_id = (int)$o['panel_inbound'];
+    $secret = $o['panel_client_id'];
+    $email = $o['panel_email'];
+    $subId = $o['panel_sub_id'];
+    $inbound = panel_get_inbound($inbound_id);
+    if (!$inbound) return false;
+    $protocol = $inbound['protocol'] ?? '';
+    $cur = panel_get_client_traffic($email);
+    $total = is_array($cur) ? (int)($cur['total'] ?? 0) : 0;
+    $exp = is_array($cur) ? (int)($cur['expiryTime'] ?? 0) : 0;
+    $client = [
+        'email' => $email, 'enable' => (bool)$enable, 'limitIp' => 0,
+        'totalGB' => $total, 'expiryTime' => $exp,
+        'tgId' => (string)$o['user_tg'], 'subId' => $subId, 'reset' => 0, 'flow' => '',
+    ];
+    if ($protocol === 'trojan') $client['password'] = $secret; else $client['id'] = $secret;
+    return panel_update_client($inbound_id, $secret, $client);
+}
+
+/* تغییر لینک: ساخت UUID/subId جدید و باطل‌کردن لینک قبلی (حجم و انقضا حفظ می‌شود) */
+function panel_change_client($o) {
+    if (!order_has_panel($o)) return false;
+    $inbound_id = (int)$o['panel_inbound'];
+    $oldSecret = $o['panel_client_id'];
+    $email = $o['panel_email'];
+    $inbound = panel_get_inbound($inbound_id);
+    if (!$inbound) return false;
+    $protocol = $inbound['protocol'] ?? '';
+    $cur = panel_get_client_traffic($email);
+    $total = is_array($cur) ? (int)($cur['total'] ?? 0) : 0;
+    $exp = is_array($cur) ? (int)($cur['expiryTime'] ?? 0) : 0;
+    $enable = is_array($cur) ? (bool)($cur['enable'] ?? true) : true;
+    $newSecret = guidv4();
+    $newSubId = bin2hex(random_bytes(8));
+    $client = [
+        'email' => $email, 'enable' => $enable, 'limitIp' => 0,
+        'totalGB' => $total, 'expiryTime' => $exp,
+        'tgId' => (string)$o['user_tg'], 'subId' => $newSubId, 'reset' => 0, 'flow' => '',
+    ];
+    if ($protocol === 'trojan') $client['password'] = $newSecret; else $client['id'] = $newSecret;
+    if (!panel_update_client($inbound_id, $oldSecret, $client)) return false;
+    db()->prepare("UPDATE orders SET panel_client_id=?, panel_sub_id=? WHERE id=?")
+        ->execute([$newSecret, $newSubId, $o['id']]);
+    $subUrl = trim(setting('panel_sub_url', ''));
+    if ($subUrl !== '') return rtrim($subUrl, '/') . '/' . $newSubId;
+    return panel_build_link($inbound, $newSecret, $email);
+}
+
 /* تست اتصال + نمایش اینباندها */
 function panel_test() {
     if (!setting('panel_url', '')) return [false, 'آدرس پنل تنظیم نشده است.'];

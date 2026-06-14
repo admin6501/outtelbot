@@ -362,7 +362,45 @@ function show_my_order_detail($chat, $mid, $tg, $oid) {
     if ($o['status'] === 'delivered' && $o['config_text']) {
         $t .= "\n\n🔻 <b>اوت‌باند شما:</b>\n" . $o['config_text'];
     }
+
+    // وضعیت زنده از پنل (حجم/انقضا/فعال بودن) برای سرویس‌های متصل به پنل
+    $enable = true;
+    $has_panel = ($o['status'] === 'delivered' && order_has_panel($o));
+    if ($has_panel) {
+        $live = panel_get_client_traffic($o['panel_email']);
+        if (is_array($live)) {
+            $used = (int)($live['up'] ?? 0) + (int)($live['down'] ?? 0);
+            $total = (int)($live['total'] ?? 0);
+            $exp = (int)($live['expiryTime'] ?? 0);
+            $enable = (bool)($live['enable'] ?? true);
+            $t .= "\n\n📊 <b>وضعیت زنده سرویس</b>\n";
+            if ($total > 0) {
+                $remain = max(0, $total - $used);
+                $t .= "🔸 مصرف‌شده: " . bytes_human($used) . " از " . bytes_human($total) . "\n";
+                $t .= "🔹 باقی‌مانده: " . bytes_human($remain) . "\n";
+            } else {
+                $t .= "🔸 مصرف‌شده: " . bytes_human($used) . " (حجم: نامحدود)\n";
+            }
+            if ($exp > 0) {
+                $daysLeft = (int)ceil(($exp - time() * 1000) / 86400000);
+                $t .= "⏳ انقضا: " . ($daysLeft > 0 ? $daysLeft . " روز باقی‌مانده" : "منقضی شده") . "\n";
+            } else {
+                $t .= "⏳ انقضا: نامحدود\n";
+            }
+            $t .= "🔌 وضعیت: " . ($enable ? '🟢 فعال' : '🔴 غیرفعال');
+        } else {
+            $t .= "\n\n⚠️ دریافت وضعیت زنده از پنل ناموفق بود.";
+        }
+    }
+
     $kb = [];
+    if ($has_panel) {
+        $kb[] = [btn('🔄 بروزرسانی وضعیت', 'oref:' . $o['id'])];
+        $kb[] = [
+            btn($enable ? '🔴 غیرفعال‌سازی' : '🟢 فعال‌سازی', 'otgl:' . $o['id']),
+            btn('🔁 تغییر لینک', 'ochg:' . $o['id']),
+        ];
+    }
     $plan = get_plan($o['plan_id']);
     if ($plan && $plan['is_active']) {
         $kb[] = [btn('🔄 تمدید این سفارش', 'renew:' . $o['id'])];
@@ -371,6 +409,60 @@ function show_my_order_detail($chat, $mid, $tg, $oid) {
     }
     $kb[] = [btn('🔙 بازگشت به سفارش‌ها', 'myorders_home')];
     edit($chat, $mid, $t, inline($kb));
+}
+
+/* گرفتن سفارش متعلق به کاربر */
+function get_user_order($oid, $tg) {
+    $st = db()->prepare("SELECT * FROM orders WHERE id=? AND user_tg=?");
+    $st->execute([$oid, $tg]);
+    return $st->fetch();
+}
+
+/* فعال/غیرفعال‌سازی سرویس از روی پنل */
+function user_toggle_config($chat, $mid, $tg, $oid) {
+    $o = get_user_order($oid, $tg);
+    if (!$o || $o['status'] !== 'delivered' || !order_has_panel($o)) {
+        edit($chat, $mid, "❌ این سرویس قابل مدیریت از ربات نیست.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
+        return;
+    }
+    $live = panel_get_client_traffic($o['panel_email']);
+    $cur = is_array($live) ? (bool)($live['enable'] ?? true) : true;
+    if (panel_set_client_enable($o, !$cur)) {
+        show_my_order_detail($chat, $mid, $tg, $oid);
+    } else {
+        edit($chat, $mid, "❌ ارتباط با پنل ناموفق بود. لطفاً بعداً تلاش کنید.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
+    }
+}
+
+/* تأیید تغییر لینک */
+function user_change_link_confirm($chat, $mid, $tg, $oid) {
+    $o = get_user_order($oid, $tg);
+    if (!$o || $o['status'] !== 'delivered' || !order_has_panel($o)) {
+        edit($chat, $mid, "❌ این سرویس قابل مدیریت از ربات نیست.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
+        return;
+    }
+    edit($chat, $mid, "⚠️ <b>تغییر لینک</b>\n\nبا این کار لینک فعلی شما <b>باطل</b> می‌شود و یک لینک جدید جایگزین آن خواهد شد.\n✅ حجم و تاریخ انقضای سرویس حفظ می‌شود.\n\nادامه می‌دهید؟",
+        inline([
+            [btn('✅ بله، لینک را تغییر بده', 'ochgok:' . $oid)],
+            [btn('🔙 انصراف', 'myorder:' . $oid)],
+        ]));
+}
+
+/* اجرای تغییر لینک */
+function user_change_link($chat, $mid, $tg, $oid) {
+    $o = get_user_order($oid, $tg);
+    if (!$o || $o['status'] !== 'delivered' || !order_has_panel($o)) {
+        edit($chat, $mid, "❌ این سرویس قابل مدیریت از ربات نیست.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
+        return;
+    }
+    $link = panel_change_client($o);
+    if ($link === false || $link === '') {
+        edit($chat, $mid, "❌ تغییر لینک ناموفق بود. لطفاً بعداً تلاش کنید.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
+        return;
+    }
+    db()->prepare("UPDATE orders SET config_text=?, updated_at=? WHERE id=?")->execute([$link, now(), $oid]);
+    edit($chat, $mid, "✅ <b>لینک شما با موفقیت تغییر کرد.</b>\nلینک قبلی دیگر کار نمی‌کند.\n\n🔻 لینک جدید:\n\n{$link}",
+        inline([[btn('🔙 بازگشت به سفارش', 'myorder:' . $oid)]]));
 }
 
 /* تمدید مستقیم همان پلن (بدون عبور از مراحل انتخاب دسته/لوکیشن/پلن) */
@@ -462,6 +554,10 @@ function user_handle_callback($cb, $u) {
         case 'dc':       start_discount($chat, $mid, $tg, $parts[1]); break;
         case 'myorders_home': show_my_orders($chat, $tg, $mid); break;
         case 'myorder':  show_my_order_detail($chat, $mid, $tg, $parts[1]); break;
+        case 'oref':     show_my_order_detail($chat, $mid, $tg, $parts[1]); break;
+        case 'otgl':     user_toggle_config($chat, $mid, $tg, $parts[1]); break;
+        case 'ochg':     user_change_link_confirm($chat, $mid, $tg, $parts[1]); break;
+        case 'ochgok':   user_change_link($chat, $mid, $tg, $parts[1]); break;
         case 'renew':    show_renew($chat, $mid, $tg, $parts[1]); break;
         case 'wallet_home':   show_wallet($chat, get_user($tg), $mid); break;
         case 'wallet_charge': start_charge($chat, $mid, $tg); break;
