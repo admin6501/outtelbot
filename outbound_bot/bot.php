@@ -298,8 +298,9 @@ function check_join($tg_id) {
     if (!$ch) return true;
     if ($ch[0] !== '@') $ch = '@' . $ch;
     $r = tg('getChatMember', ['chat_id' => $ch, 'user_id' => $tg_id]);
-    if (!isset($r['ok']) || !$r['ok']) return true; // اگر ربات ادمین کانال نباشد، مسدود نکن
+    if (!is_array($r) || empty($r['ok'])) return false; // عضو نیست یا ربات در کانال ادمین نیست → اجازه نده
     $status = $r['result']['status'] ?? '';
+    if ($status === 'restricted') return !empty($r['result']['is_member']);
     return in_array($status, ['member', 'administrator', 'creator'], true);
 }
 function send_join_prompt($chat) {

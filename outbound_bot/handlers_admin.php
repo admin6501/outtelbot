@@ -401,7 +401,13 @@ function admin_handle_callback($cb, $u) {
                 'del_grace_vol' => 'مهلت حذف کانفیگ فقط‌حجمی پس از اتمام حجم (روز)',
             ];
             set_step($tg, 'admin_set_setting'); set_temp($tg, ['key' => $key]);
-            edit($chat, $mid, "✏️ مقدار جدید برای «" . ($labels[$key] ?? $key) . "» را وارد کنید:\n/cancel برای لغو");
+            $hint = "✏️ مقدار جدید برای «" . ($labels[$key] ?? $key) . "» را وارد کنید:\n/cancel برای لغو";
+            if ($key === 'channel_username') {
+                $hint = "📢 <b>یوزرنیم کانال جوین اجباری</b> را وارد کنید (بدون @):\n\n"
+                      . "⚠️ <b>مهم:</b> ربات حتماً باید در این کانال <b>ادمین</b> باشد، در غیر این صورت بررسی عضویت کار نمی‌کند و کاربران نمی‌توانند از ربات استفاده کنند.\n\n"
+                      . "/cancel برای لغو";
+            }
+            edit($chat, $mid, $hint);
             break;
         case 'a_toggle_join': set_setting('forced_join', setting('forced_join') === '1' ? '0' : '1'); admin_settings($chat, $mid); break;
         case 'a_toggle_card': set_setting('card_enabled', setting('card_enabled') === '1' ? '0' : '1'); admin_settings($chat, $mid); break;
