@@ -378,6 +378,8 @@ function admin_handle_callback($cb, $u) {
         case 'a_user': admin_show_user($chat, $mid, $p1); break;
         case 'a_user_block': db()->prepare("UPDATE users SET is_blocked=1-is_blocked WHERE tg_id=?")->execute([$p1]); admin_show_user($chat, $mid, $p1); break;
         case 'a_user_bal': set_step($tg, 'admin_ubal'); set_temp($tg, ['uid' => $p1]); edit($chat, $mid, "💰 مبلغ افزایش/کاهش موجودی را وارد کنید (برای کاهش از - استفاده کنید):\nمثال: <code>50000</code> یا <code>-20000</code>\n/cancel برای لغو"); break;
+        case 'a_user_order': admin_uo_pick_plan($chat, $mid, $p1); break;
+        case 'a_uo_pick': admin_create_order_for_user($tg, $chat, $mid, $p1, ($parts[2] ?? 0)); break;
 
         /* پیام همگانی */
         case 'a_bc': set_step($tg, 'admin_broadcast'); edit($chat, $mid, "📢 متن پیام همگانی را ارسال کنید:\n/cancel برای لغو"); break;
@@ -717,11 +719,53 @@ function admin_show_user($chat, $mid, $uid) {
     $orders = db()->prepare("SELECT COUNT(*) c FROM orders WHERE user_tg=?"); $orders->execute([$uid]);
     $t = "👤 <b>اطلاعات کاربر</b>\n\n🆔 آیدی: <code>{$usr['tg_id']}</code>\n📛 نام: {$usr['first_name']}\n🔖 یوزرنیم: " . ($usr['username'] ? '@' . $usr['username'] : '—') . "\n💰 موجودی: " . fmt($usr['balance']) . " تومان\n🧾 سفارش‌ها: " . $orders->fetch()['c'] . "\n🚫 وضعیت: " . ($usr['is_blocked'] ? 'مسدود' : 'فعال');
     $kb = [
+        [btn('🎁 ثبت سفارش / فعال‌سازی پلن', 'a_user_order:' . $usr['tg_id'])],
         [btn('💰 تنظیم موجودی', 'a_user_bal:' . $usr['tg_id'])],
         [btn($usr['is_blocked'] ? '✅ رفع مسدودی' : '🚫 مسدود کردن', 'a_user_block:' . $usr['tg_id'])],
         [btn('🔙 بازگشت', 'a_users')],
     ];
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+/* ---------- ثبت سفارش/فعال‌سازی پلن برای کاربر توسط ادمین ---------- */
+function admin_uo_pick_plan($chat, $mid, $uid) {
+    $usr = get_user($uid);
+    if (!$usr) { edit($chat, $mid, "کاربر یافت نشد."); return; }
+    $rows = db()->query("SELECT p.*, l.name loc, l.flag flag FROM plans p
+        LEFT JOIN locations l ON l.id=p.location_id
+        WHERE p.is_active=1 ORDER BY p.id DESC")->fetchAll();
+    if (!$rows) { edit($chat, $mid, "❌ هیچ پلن فعالی برای ثبت وجود ندارد. ابتدا یک پلن بسازید.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]])); return; }
+    $un = $usr['username'] ? '@' . $usr['username'] : $uid;
+    $kb = [];
+    foreach ($rows as $r) {
+        $auto = (int)($r['inbound_id'] ?? 0) > 0 ? '⚡' : '';
+        $label = "{$auto}#{$r['id']} {$r['title']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
+        $kb[] = [btn(mb_substr($label, 0, 60), 'a_uo_pick:' . $uid . ':' . $r['id'])];
+    }
+    $kb[] = [btn('🔙 بازگشت', 'a_user:' . $uid)];
+    $t = "🎁 <b>ثبت سفارش برای کاربر</b>\n👤 {$un}\n\nپلنی که می‌خواهید برای این کاربر فعال کنید را انتخاب کنید:\n⚡ = تحویل خودکار از پنل 3x-ui";
+    edit($chat, $mid, $t, inline($kb));
+}
+
+function admin_create_order_for_user($admin_tg, $chat, $mid, $uid, $plan_id) {
+    $p = get_plan($plan_id);
+    if (!$p) { edit($chat, $mid, "❌ پلن یافت نشد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]])); return; }
+    $usr = get_user($uid);
+    if (!$usr) { edit($chat, $mid, "❌ کاربر یافت نشد."); return; }
+    $st = db()->prepare("INSERT INTO orders(user_tg, plan_id, plan_title, price, status, payment_method, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?)");
+    $st->execute([$uid, $p['id'], $p['title'], $p['price'], 'paid', 'admin', now(), now()]);
+    $oid = db()->lastInsertId();
+    $un = $usr['username'] ? '@' . $usr['username'] : $uid;
+    // تلاش برای تحویل خودکار از پنل 3x-ui
+    if (try_auto_deliver($oid)) {
+        edit($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت و اوت‌باند به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
+        return;
+    }
+    // تحویل دستی: درخواست متن کانفیگ از ادمین (همان جریان ارسال کانفیگ سفارش‌ها)
+    set_step($admin_tg, 'admin_send_config'); set_temp($admin_tg, ['order_id' => $oid]);
+    edit($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
+    send($chat, "✍️ اکنون متن اوت‌باند/کانفیگ سفارش #{$oid} را ارسال کنید تا برای کاربر فرستاده و سفارش تحویل شود:\n(تحویل خودکار انجام نشد یا اینباند این پلن تنظیم نشده است)\n/cancel برای لغو");
 }
 
 /* ---------- زیرمجموعه‌گیری ---------- */

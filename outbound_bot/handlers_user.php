@@ -260,8 +260,21 @@ function show_wallet($chat, $u, $mid = null) {
     $mid ? edit($chat, $mid, $t, $kb) : send($chat, $t, $kb);
 }
 function start_charge($chat, $mid, $tg) {
+    if (setting('card_enabled', '1') !== '1') { charge_via_support($chat, $mid, $tg); return; }
     set_step($tg, 'charge_amount');
     edit($chat, $mid, "➕ <b>شارژ کیف پول</b>\n\nمبلغ مورد نظر (به تومان) را وارد کنید:\nحداقل مبلغ: " . fmt(setting('min_charge')) . " تومان\n\nبرای لغو /cancel را بزنید.");
+}
+function charge_via_support($chat, $mid, $tg) {
+    set_step($tg, ''); set_temp($tg, []);
+    $s = ltrim(setting('support_username', ''), '@');
+    $t = "☎️ <b>شارژ کیف پول از طریق پشتیبانی</b>\n\n"
+       . "در حال حاضر پرداخت کارت‌به‌کارت غیرفعال است.\n"
+       . "برای شارژ کیف پول، لطفاً به پشتیبانی پیام دهید و مبلغ مورد نظر را اعلام کنید:\n@{$s}";
+    $kb = [
+        [url_btn('💬 پیام به پشتیبانی', 'https://t.me/' . $s)],
+        [btn('🔙 بازگشت', 'wallet_home')],
+    ];
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 function handle_charge_amount($tg, $chat, $text) {
     $amount = (int)preg_replace('/\D/', '', $text);
