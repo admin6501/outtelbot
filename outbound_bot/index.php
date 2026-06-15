@@ -7,6 +7,7 @@ require __DIR__ . '/bot.php';
 require __DIR__ . '/panel.php';
 require __DIR__ . '/handlers_user.php';
 require __DIR__ . '/handlers_admin.php';
+require __DIR__ . '/backup.php';
 
 db_init();
 
@@ -24,6 +25,15 @@ try {
         if ($u['is_blocked']) exit;
         $text = $msg['text'] ?? '';
         $step = $u['step'];
+
+        // دریافت فایل (سند) — برای بازگردانی دیتابیس توسط ادمین
+        if (isset($msg['document'])) {
+            if (is_admin($tg) && $step === 'admin_restore_wait') {
+                admin_handle_restore_document($msg, $u);
+            }
+            http_response_code(200);
+            exit;
+        }
 
         if (is_admin($tg) && ($text === '/admin' || strpos($step, 'admin_') === 0 || is_admin_menu_text($text))) {
             admin_handle_message($msg, $u);

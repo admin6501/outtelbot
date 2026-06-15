@@ -36,10 +36,17 @@
   - توابع جدید panel.php: `bytes_human`, `order_has_panel`, `panel_set_client_enable`, `panel_change_client`
   - کال‌بک‌ها: `oref`, `otgl`, `ochg`, `ochgok`
   - تست: ۹ assertion با mock 3x-ui — همه PASS
+- **[2025-07] سیستم بکاپ‌گیری و بازگردانی دیتابیس (فایل جدید `backup.php`):**
+  - بکاپ دستی: ارسال اسنپ‌شات SQLite (با `VACUUM INTO`) به‌صورت فایل به پیوی همه‌ی ادمین‌ها
+  - بکاپ خودکار: قابل روشن/خاموش + فاصله‌ی زمانی قابل تنظیم (ساعت) از پنل؛ اجرا توسط `run_backup_cron()` در `cron.php`
+  - بازگردانی: ادمین فایل `.db` را آپلود می‌کند → دانلود (`getFile`)، اعتبارسنجی (هدر SQLite + `integrity_check` + وجود جداول users/orders/settings)، مقایسه‌ی آمار، تایید دو‌مرحله‌ای، نسخه‌ی ایمنی خودکار از دیتابیس فعلی، سپس جایگزینی امن (unlink+rename)
+  - تنظیمات جدید: `backup_auto`, `backup_interval_hours`, `backup_last_at`
+  - UI: دکمه «💾 بکاپ و بازگردانی» در پنل تنظیمات؛ روتینگ `document` در `index.php` برای دریافت فایل restore
+  - تست: ۱۵ assertion محلی با PHP (بدون شبکه) — همه PASS
 
 ## بک‌لاگ (اولویت‌بندی)
 - **P1**: تست با پنل 3x-ui واقعی کاربر (تاکنون فقط mock تست شده). تطبیق endpointها با نسخه پنل کاربر.
-- **P2**: تمدید خودکار SSL (cron) و بکاپ خودکار دیتابیس SQLite به تلگرام.
+- **P2**: تمدید خودکار SSL (cron).
 
 ## نکات مهم
 - توسعه در محیط PHP خام؛ تست با شبیه‌سازی webhook تلگرام و mock سرور 3x-ui (`php -S`).

@@ -128,6 +128,9 @@ function db_init() {
         'warn_gb'          => '1',
         'del_grace_time'   => '1',
         'del_grace_vol'    => '7',
+        'backup_auto'          => '0',
+        'backup_interval_hours'=> '24',
+        'backup_last_at'       => '',
     ];
     foreach ($defaults as $k => $v) {
         $st = $db->prepare("INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)");

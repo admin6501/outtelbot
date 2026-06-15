@@ -164,10 +164,15 @@ function admin_handle_message($msg, $u) {
 
         case 'admin_set_setting':
             $key = $temp['key'] ?? '';
-            if ($key) { set_setting($key, $text); }
+            if ($key) {
+                $val = $text;
+                if ($key === 'backup_interval_hours') { $val = (string)max(1, bk_int($text)); }
+                set_setting($key, $val);
+            }
             set_step($tg, ''); set_temp($tg, []);
             send($chat, "✅ مقدار ذخیره شد.");
-            admin_settings($chat);
+            if ($key === 'backup_interval_hours') { admin_backup_menu($chat); }
+            else { admin_settings($chat); }
             break;
 
         case 'admin_user_search':
@@ -419,6 +424,38 @@ function admin_handle_callback($cb, $u) {
             edit($chat, $mid, "⏳ در حال تست اتصال به پنل...");
             list($ok, $report) = panel_test();
             edit($chat, $mid, ($ok ? "" : "❌ ") . $report, inline([[btn('🔙 بازگشت', 'a_panel')]]));
+            break;
+
+        /* بکاپ و بازگردانی */
+        case 'a_backup': admin_backup_menu($chat, $mid); break;
+        case 'a_backup_now':
+            edit($chat, $mid, "⏳ در حال ساخت و ارسال بکاپ...");
+            list($ok, $why, $cnt) = backup_send_to_admins('📦 بکاپ دستی دیتابیس');
+            edit($chat, $mid, ($ok ? "✅ بکاپ ساخته و برای <b>{$cnt}</b> ادمین ارسال شد." : "❌ " . $why), inline([[btn('🔙 بازگشت', 'a_backup')]]));
+            break;
+        case 'a_backup_toggle':
+            set_setting('backup_auto', setting('backup_auto', '0') === '1' ? '0' : '1');
+            admin_backup_menu($chat, $mid);
+            break;
+        case 'a_backup_interval':
+            set_step($tg, 'admin_set_setting'); set_temp($tg, ['key' => 'backup_interval_hours']);
+            edit($chat, $mid, "⏱ فاصله‌ی زمانی بکاپ خودکار را به <b>ساعت</b> وارد کنید (مثلاً 24):\n/cancel برای لغو");
+            break;
+        case 'a_backup_restore':
+            set_step($tg, 'admin_restore_wait'); set_temp($tg, []);
+            edit($chat, $mid, "📥 <b>بازگردانی دیتابیس</b>\n\nفایل بکاپ <code>.db</code> را همین‌جا به‌صورت <b>فایل/سند</b> ارسال (آپلود) کنید.\n\n⚠️ مطمئن شوید این فایل، بکاپ معتبر همین ربات است. پس از ارسال، قبل از جایگزینی از شما تایید گرفته می‌شود.\n/cancel برای لغو");
+            break;
+        case 'a_restore_do':
+            list($ok, $why) = restore_do_pending();
+            if ($ok) {
+                edit($chat, $mid, "✅ <b>بازگردانی با موفقیت انجام شد.</b>\n\nدیتابیس جدید جایگزین شد و یک نسخه‌ی پشتیبان از دیتابیس قبلی در پوشه‌ی data ذخیره گردید.", inline([[btn('🔙 بازگشت', 'a_backup')]]));
+            } else {
+                edit($chat, $mid, "❌ بازگردانی ناموفق: " . $why, inline([[btn('🔙 بازگشت', 'a_backup')]]));
+            }
+            break;
+        case 'a_restore_cancel':
+            @unlink(backup_pending_path());
+            edit($chat, $mid, "❌ بازگردانی لغو شد و فایل آپلودی حذف گردید.", inline([[btn('🔙 بازگشت', 'a_backup')]]));
             break;
     }
 }
@@ -718,6 +755,7 @@ function admin_settings($chat, $mid = null) {
         [btn($card ? '🔴 خاموش‌کردن کارت‌به‌کارت' : '🟢 روشن‌کردن کارت‌به‌کارت', 'a_toggle_card')],
         [btn('🔌 اتصال پنل 3x-ui (تحویل خودکار)', 'a_panel')],
         [btn('⏰ هشدار و انقضای خودکار', 'a_expiry')],
+        [btn('💾 بکاپ و بازگردانی', 'a_backup')],
         [btn('📝 متن خوش‌آمد', 'a_set:welcome_text')],
         [btn('🔙 بازگشت', 'a_back')],
     ];
@@ -761,4 +799,69 @@ function admin_panel_config($chat, $mid = null) {
         [btn('🔙 بازگشت', 'a_settings')],
     ];
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+/* ---------- بکاپ و بازگردانی ---------- */
+function admin_backup_menu($chat, $mid = null) {
+    $auto     = setting('backup_auto', '0') === '1';
+    $interval = bk_int(setting('backup_interval_hours', '24'));
+    if ($interval < 1) $interval = 24;
+    $last  = setting('backup_last_at', '');
+    $size  = is_file(DB_PATH) ? bytes_human(filesize(DB_PATH)) : '—';
+    $stats = backup_db_stats();
+    $t = "💾 <b>بکاپ و بازگردانی دیتابیس</b>\n\n"
+       . "💽 حجم دیتابیس فعلی: <b>{$size}</b>\n"
+       . "👤 کاربران: <b>{$stats['users']}</b> | 🧾 سفارش‌ها: <b>{$stats['orders']}</b> | 📦 پلن‌ها: <b>{$stats['plans']}</b>\n\n"
+       . "🔄 بکاپ خودکار: " . ($auto ? '🟢 فعال' : '🔴 غیرفعال') . "\n"
+       . "⏱ فاصله‌ی زمانی: هر <b>{$interval}</b> ساعت\n"
+       . "🕒 آخرین بکاپ خودکار: " . ($last ?: '—') . "\n\n"
+       . "ℹ️ فایل بکاپ برای همه‌ی ادمین‌ها در همین‌جا ارسال می‌شود.\n"
+       . "ℹ️ بکاپ خودکار توسط زمان‌بند سرور (cron / همان فایل cron.php) اجرا می‌گردد.";
+    $kb = [
+        [btn('📤 دریافت بکاپ همین حالا', 'a_backup_now')],
+        [btn($auto ? '🔴 خاموش‌کردن بکاپ خودکار' : '🟢 روشن‌کردن بکاپ خودکار', 'a_backup_toggle')],
+        [btn('⏱ تنظیم فاصله‌ی زمانی', 'a_backup_interval')],
+        [btn('📥 بازگردانی از فایل', 'a_backup_restore')],
+        [btn('🔙 بازگشت', 'a_settings')],
+    ];
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+/* دریافت فایل بکاپ آپلودی ادمین و آماده‌سازی تایید بازگردانی */
+function admin_handle_restore_document($msg, $u) {
+    $chat = $msg['chat']['id'];
+    $tg   = $msg['from']['id'];
+    $doc  = $msg['document'];
+    $size = (int)($doc['file_size'] ?? 0);
+    if ($size > 18 * 1024 * 1024) {
+        send($chat, "❌ حجم فایل بیش از حد مجاز ربات برای دانلود (حدود ۲۰ مگابایت) است.");
+        return;
+    }
+    send($chat, "⏳ در حال دریافت و بررسی فایل بکاپ...");
+    $pending = backup_pending_path();
+    @unlink($pending);
+    if (!tg_download_file($doc['file_id'], $pending)) {
+        send($chat, "❌ دانلود فایل ناموفق بود. دوباره تلاش کنید یا /cancel بزنید.");
+        return;
+    }
+    list($ok, $why) = backup_validate_sqlite($pending);
+    if (!$ok) {
+        @unlink($pending);
+        send($chat, "❌ {$why}\n\nلطفاً فایل بکاپ صحیح این ربات را ارسال کنید یا /cancel بزنید.");
+        return;
+    }
+    set_step($tg, ''); set_temp($tg, []);
+    $new = backup_stats_of($pending);
+    $cur = backup_db_stats();
+    $t = "⚠️ <b>تایید بازگردانی دیتابیس</b>\n\n"
+       . "فایل بکاپ معتبر است. مقایسه‌ی محتوا:\n\n"
+       . "📥 <b>فایل آپلودی:</b>\n👤 کاربران: <b>{$new['users']}</b> | 🧾 سفارش‌ها: <b>{$new['orders']}</b> | 📦 پلن‌ها: <b>{$new['plans']}</b>\n\n"
+       . "💽 <b>دیتابیس فعلی:</b>\n👤 کاربران: <b>{$cur['users']}</b> | 🧾 سفارش‌ها: <b>{$cur['orders']}</b> | 📦 پلن‌ها: <b>{$cur['plans']}</b>\n\n"
+       . "🛑 با تایید، دیتابیس فعلی به‌طور کامل با فایل بالا <b>جایگزین</b> می‌شود.\n"
+       . "(یک نسخه‌ی پشتیبان از دیتابیس فعلی هم به‌صورت خودکار ذخیره خواهد شد.)";
+    $kb = inline([
+        [btn('✅ بله، جایگزین کن', 'a_restore_do')],
+        [btn('❌ انصراف', 'a_restore_cancel')],
+    ]);
+    send($chat, $t, $kb);
 }
