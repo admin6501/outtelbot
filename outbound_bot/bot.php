@@ -135,7 +135,7 @@ function db_init() {
         'panel_auto'       => '0',
         'panel_cookie'     => '',
         'panel_cookie_time'=> '0',
-        'welcome_text'     => "🌐 به ربات فروش اوت‌باند خوش آمدید!\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
+        'welcome_text'     => "🌐 به ربات فروش کانفیگ خوش آمدید!\n\nاز منوی زیر یکی از گزینه‌ها را انتخاب کنید.",
         'bot_username'     => '',
         'warn_days'        => '2',
         'warn_gb'          => '1',
@@ -195,6 +195,13 @@ function db_init() {
             $db->exec("UPDATE plans SET panel_id=$pid WHERE COALESCE(panel_id,0)=0 AND COALESCE(inbound_id,0)>0");
             $db->exec("UPDATE orders SET panel_id=$pid WHERE COALESCE(panel_id,0)=0 AND COALESCE(panel_inbound,0)>0");
         }
+    }
+
+    // مهاجرت متن: اگر متن خوش‌آمدِ ذخیره‌شده هنوز همان پیش‌فرض قدیمی («اوت‌باند») است، به «کانفیگ» به‌روز شود
+    $oldWelcome = "🌐 به ربات فروش اوت\u{200c}باند خوش آمدید!\n\nاز منوی زیر یکی از گزینه\u{200c}ها را انتخاب کنید.";
+    $newWelcome = "🌐 به ربات فروش کانفیگ خوش آمدید!\n\nاز منوی زیر یکی از گزینه\u{200c}ها را انتخاب کنید.";
+    if (setting('welcome_text', '') === $oldWelcome) {
+        set_setting('welcome_text', $newWelcome);
     }
 }
 

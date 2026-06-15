@@ -257,8 +257,8 @@ function admin_handle_message($msg, $u) {
             deliver_order($oid, $msg['text'] ?? '');
             set_step($tg, ''); set_temp($tg, []);
             send($chat, $was
-                ? "✅ اوت‌باند سفارش #{$oid} تغییر کرد و نسخه‌ی جدید برای کاربر ارسال شد."
-                : "✅ اوت‌باند برای کاربر ارسال شد و سفارش #{$oid} تحویل داده شد.");
+                ? "✅ کانفیگ سفارش #{$oid} تغییر کرد و نسخه‌ی جدید برای کاربر ارسال شد."
+                : "✅ کانفیگ برای کاربر ارسال شد و سفارش #{$oid} تحویل داده شد.");
             break;
 
         case 'admin_cancel_amount':
@@ -295,13 +295,13 @@ function deliver_order($oid, $config_text, $renew = false) {
     db()->prepare("UPDATE orders SET status='delivered', config_text=?, warn_time_at='', warn_vol_at='', depleted_at='', updated_at=? WHERE id=?")
         ->execute([$config_text, now(), $oid]);
     if ($was_delivered) {
-        send($o['user_tg'], "🔄 <b>اوت‌باند سفارش #{$oid} به‌روزرسانی شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند جدید شما:\n\n{$config_text}");
+        send($o['user_tg'], "🔄 <b>کانفیگ سفارش #{$oid} به‌روزرسانی شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 کانفیگ جدید شما:\n\n{$config_text}");
         return; // ویرایش است؛ پاداش زیرمجموعه دوباره داده نمی‌شود
     }
     if ($renew) {
-        send($o['user_tg'], "🔄 <b>تمدید سفارش #{$oid} انجام شد!</b>\n\n📦 پلن: {$o['plan_title']}\n⏳ سرویس شما تمدید و حجم آن تازه‌سازی شد.\n\n🔻 اوت‌باند شما (همان لینک قبلی):\n\n{$config_text}");
+        send($o['user_tg'], "🔄 <b>تمدید سفارش #{$oid} انجام شد!</b>\n\n📦 پلن: {$o['plan_title']}\n⏳ سرویس شما تمدید و حجم آن تازه‌سازی شد.\n\n🔻 کانفیگ شما (همان لینک قبلی):\n\n{$config_text}");
     } else {
-        send($o['user_tg'], "✅ <b>سفارش #{$oid} آماده شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 اوت‌باند شما:\n\n{$config_text}");
+        send($o['user_tg'], "✅ <b>سفارش #{$oid} آماده شد!</b>\n\n📦 پلن: {$o['plan_title']}\n\n🔻 کانفیگ شما:\n\n{$config_text}");
     }
     // پاداش زیرمجموعه‌گیری (در تحویل اول و تمدید)
     if (setting('referral_enabled', '1') === '1') {
@@ -405,19 +405,19 @@ function admin_handle_callback($cb, $u) {
         case 'a_oappr':
             db()->prepare("UPDATE orders SET status='paid', updated_at=? WHERE id=?")->execute([now(), $p1]);
             if (try_auto_deliver($p1)) {
-                edit($chat, $mid, "✅ پرداخت سفارش #{$p1} تایید و اوت‌باند به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_orders')]]));
+                edit($chat, $mid, "✅ پرداخت سفارش #{$p1} تایید و کانفیگ به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_orders')]]));
             } else {
                 set_step($tg, 'admin_send_config'); set_temp($tg, ['order_id' => $p1]);
-                send($chat, "✅ پرداخت سفارش #{$p1} تایید شد.\n\n✍️ اکنون متن اوت‌باند/کانفیگ را ارسال کنید تا برای کاربر فرستاده شود:\n(تحویل خودکار انجام نشد یا غیرفعال است)\n/cancel برای لغو");
+                send($chat, "✅ پرداخت سفارش #{$p1} تایید شد.\n\n✍️ اکنون متن کانفیگ را ارسال کنید تا برای کاربر فرستاده شود:\n(تحویل خودکار انجام نشد یا غیرفعال است)\n/cancel برای لغو");
             }
             break;
         case 'a_osend':
             set_step($tg, 'admin_send_config'); set_temp($tg, ['order_id' => $p1]);
             $st = db()->prepare("SELECT config_text, status FROM orders WHERE id=?"); $st->execute([$p1]); $oo = $st->fetch();
             if ($oo && $oo['status'] === 'delivered' && $oo['config_text']) {
-                send($chat, "✏️ <b>تغییر اوت‌باند سفارش #{$p1}</b>\n\n🔻 اوت‌باند فعلی:\n{$oo['config_text']}\n\n👇 متن جدید اوت‌باند را ارسال کنید تا جایگزین شود و برای کاربر ارسال گردد:\n/cancel برای لغو");
+                send($chat, "✏️ <b>تغییر کانفیگ سفارش #{$p1}</b>\n\n🔻 کانفیگ فعلی:\n{$oo['config_text']}\n\n👇 متن جدید کانفیگ را ارسال کنید تا جایگزین شود و برای کاربر ارسال گردد:\n/cancel برای لغو");
             } else {
-                send($chat, "✍️ متن اوت‌باند/کانفیگ سفارش #{$p1} را ارسال کنید:\n/cancel برای لغو");
+                send($chat, "✍️ متن کانفیگ سفارش #{$p1} را ارسال کنید:\n/cancel برای لغو");
             }
             break;
         case 'a_ocancel': admin_cancel_menu($chat, $mid, $p1); break;
@@ -738,7 +738,7 @@ function admin_show_order($chat, $mid, $oid) {
     $un = $usr && $usr['username'] ? '@' . $usr['username'] : $o['user_tg'];
     $t = "🧾 <b>سفارش #{$o['id']}</b>\n👤 کاربر: {$un} ({$o['user_tg']})\n📦 پلن: {$o['plan_title']}\n💰 مبلغ: " . fmt($o['price']) . " تومان\n💳 روش: {$o['payment_method']}\n📌 وضعیت: " . status_label($o['status']) . "\n🕒 {$o['created_at']}";
     if ($o['status'] === 'delivered' && $o['config_text']) {
-        $t .= "\n\n🔻 <b>اوت‌باند فعلی:</b>\n" . $o['config_text'];
+        $t .= "\n\n🔻 <b>کانفیگ فعلی:</b>\n" . $o['config_text'];
     }
     $kb = [];
     if ($o['status'] === 'pending_approval') {
@@ -747,7 +747,7 @@ function admin_show_order($chat, $mid, $oid) {
     } elseif ($o['status'] === 'paid') {
         $kb[] = [btn('📤 ارسال کانفیگ', 'a_osend:' . $oid)];
     } elseif ($o['status'] === 'delivered') {
-        $kb[] = [btn('✏️ تغییر اوت‌باند', 'a_osend:' . $oid)];
+        $kb[] = [btn('✏️ تغییر کانفیگ', 'a_osend:' . $oid)];
     }
     if ($o['status'] !== 'rejected') {
         $kb[] = [btn('🚫 لغو سفارش', 'a_ocancel:' . $oid)];
@@ -899,13 +899,13 @@ function admin_create_order_for_user($admin_tg, $chat, $mid, $uid, $plan_id) {
     $un = $usr['username'] ? '@' . $usr['username'] : $uid;
     // تلاش برای تحویل خودکار از پنل 3x-ui
     if (try_auto_deliver($oid)) {
-        out($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت و اوت‌باند به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
+        out($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت و کانفیگ به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
         return;
     }
     // تحویل دستی: درخواست متن کانفیگ از ادمین (همان جریان ارسال کانفیگ سفارش‌ها)
     set_step($admin_tg, 'admin_send_config'); set_temp($admin_tg, ['order_id' => $oid]);
     out($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
-    send($chat, "✍️ اکنون متن اوت‌باند/کانفیگ سفارش #{$oid} را ارسال کنید تا برای کاربر فرستاده و سفارش تحویل شود:\n(تحویل خودکار انجام نشد یا اینباند این پلن تنظیم نشده است)\n/cancel برای لغو");
+    send($chat, "✍️ اکنون متن کانفیگ سفارش #{$oid} را ارسال کنید تا برای کاربر فرستاده و سفارش تحویل شود:\n(تحویل خودکار انجام نشد یا اینباند این پلن تنظیم نشده است)\n/cancel برای لغو");
 }
 
 /* ---------- زیرمجموعه‌گیری ---------- */
