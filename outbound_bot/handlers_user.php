@@ -385,6 +385,7 @@ function show_my_order_detail($chat, $mid, $tg, $oid) {
     $enable = true;
     $has_panel = ($o['status'] === 'delivered' && order_has_panel($o));
     if ($has_panel) {
+        panel_use_for_order($o);
         $live = panel_get_client_traffic($o['panel_email']);
         if (is_array($live)) {
             $used = (int)($live['up'] ?? 0) + (int)($live['down'] ?? 0);
@@ -443,6 +444,7 @@ function user_toggle_config($chat, $mid, $tg, $oid) {
         edit($chat, $mid, "❌ این سرویس قابل مدیریت از ربات نیست.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
         return;
     }
+    panel_use_for_order($o);
     $live = panel_get_client_traffic($o['panel_email']);
     $cur = is_array($live) ? (bool)($live['enable'] ?? true) : true;
     if (panel_set_client_enable($o, !$cur)) {
@@ -473,6 +475,7 @@ function user_change_link($chat, $mid, $tg, $oid) {
         edit($chat, $mid, "❌ این سرویس قابل مدیریت از ربات نیست.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));
         return;
     }
+    panel_use_for_order($o);
     $link = panel_change_client($o);
     if ($link === false || $link === '') {
         edit($chat, $mid, "❌ تغییر لینک ناموفق بود. لطفاً بعداً تلاش کنید.", inline([[btn('🔙 بازگشت', 'myorder:' . $oid)]]));

@@ -101,8 +101,7 @@ function admin_handle_message($msg, $u) {
             break;
         case 'admin_plan_price':
             $temp['price'] = (int)preg_replace('/\D/', '', $text); set_temp($tg, $temp);
-            set_step($tg, 'admin_plan_inbound');
-            send($chat, "🔌 آیدی اینباند پنل 3x-ui برای تحویل خودکار را وارد کنید:\n<b>۰ = تحویل دستی</b>\n(برای دیدن آیدی اینباندها: پنل ادمین → ⚙️ تنظیمات → 🔌 اتصال پنل → تست اتصال)");
+            admin_plan_ask_panel($chat, $tg, 'a_pcpanel');
             break;
         case 'admin_plan_inbound':
             $temp['inbound_id'] = (int)preg_replace('/\D/', '', $text); set_temp($tg, $temp);
@@ -116,10 +115,12 @@ function admin_handle_message($msg, $u) {
             break;
         case 'admin_plan_duration':
             $dur = (int)preg_replace('/\D/', '', $text);
-            db()->prepare("INSERT INTO plans(category_id, location_id, title, description, price, inbound_id, traffic_gb, duration_days, created_at) VALUES(?,?,?,?,?,?,?,?,?)")
-                ->execute([$temp['cat'], $temp['loc'], $temp['title'], $temp['desc'], $temp['price'], $temp['inbound_id'], $temp['traffic_gb'], $dur, now()]);
+            $pnl = (int)($temp['panel_id'] ?? 0);
+            db()->prepare("INSERT INTO plans(category_id, location_id, title, description, price, panel_id, inbound_id, traffic_gb, duration_days, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+                ->execute([$temp['cat'], $temp['loc'], $temp['title'], $temp['desc'], $temp['price'], $pnl, $temp['inbound_id'], $temp['traffic_gb'], $dur, now()]);
             set_step($tg, ''); set_temp($tg, []);
-            $mode = $temp['inbound_id'] > 0 ? "تحویل خودکار (اینباند #{$temp['inbound_id']})" : "تحویل دستی";
+            $pn = $pnl > 0 ? panel_get($pnl) : null;
+            $mode = $temp['inbound_id'] > 0 ? "تحویل خودکار (" . ($pn['name'] ?? 'پنل') . " / اینباند #{$temp['inbound_id']})" : "تحویل دستی";
             send($chat, "✅ پلن «{$temp['title']}» با قیمت " . fmt($temp['price']) . " تومان اضافه شد.\nنوع تحویل: {$mode}");
             admin_list_plans($chat);
             break;
@@ -136,12 +137,41 @@ function admin_handle_message($msg, $u) {
             break;
         case 'admin_planset_duration':
             $dur = (int)preg_replace('/\D/', '', $text);
-            db()->prepare("UPDATE plans SET inbound_id=?, traffic_gb=?, duration_days=? WHERE id=?")
-                ->execute([$temp['inbound_id'], $temp['traffic_gb'], $dur, $temp['plan_edit']]);
+            db()->prepare("UPDATE plans SET panel_id=?, inbound_id=?, traffic_gb=?, duration_days=? WHERE id=?")
+                ->execute([(int)($temp['panel_id'] ?? 0), $temp['inbound_id'], $temp['traffic_gb'], $dur, $temp['plan_edit']]);
             $pid = $temp['plan_edit'];
             set_step($tg, ''); set_temp($tg, []);
             send($chat, "✅ تنظیمات تحویل خودکار پلن ذخیره شد.");
             admin_show_plan($chat, null, $pid);
+            break;
+
+        case 'admin_planprice':
+            $newp = (int)preg_replace('/\D/', '', $text);
+            $pid = (int)($temp['plan_edit'] ?? 0);
+            db()->prepare("UPDATE plans SET price=? WHERE id=?")->execute([$newp, $pid]);
+            set_step($tg, ''); set_temp($tg, []);
+            send($chat, "✅ قیمت پلن به " . fmt($newp) . " تومان تغییر کرد.");
+            admin_show_plan($chat, null, $pid);
+            break;
+
+        case 'admin_panel_addname':
+            db()->prepare("INSERT INTO panels(name, is_active, created_at) VALUES(?,?,?)")->execute([$text, 1, now()]);
+            $newPanelId = (int)db()->lastInsertId();
+            set_step($tg, ''); set_temp($tg, []);
+            send($chat, "✅ پنل «{$text}» ساخته شد. اکنون آدرس، یوزرنیم و پسورد آن را تنظیم کنید 👇");
+            admin_panel_view($chat, null, $newPanelId);
+            break;
+
+        case 'admin_pset':
+            $pid = (int)($temp['panel_id'] ?? 0);
+            $field = $temp['field'] ?? '';
+            $allowed = ['name', 'url', 'username', 'password', 'address', 'sub_url'];
+            if ($pid > 0 && in_array($field, $allowed, true)) {
+                db()->prepare("UPDATE panels SET $field=?, cookie='', cookie_time=0 WHERE id=?")->execute([trim($text), $pid]);
+            }
+            set_step($tg, ''); set_temp($tg, []);
+            send($chat, "✅ مقدار ذخیره شد.");
+            admin_panel_view($chat, null, $pid);
             break;
 
         case 'admin_dc_add':
@@ -318,13 +348,45 @@ function admin_handle_callback($cb, $u) {
         case 'a_plan_tg': db()->prepare("UPDATE plans SET is_active=1-is_active WHERE id=?")->execute([$p1]); admin_show_plan($chat, $mid, $p1); break;
         case 'a_plan_hide': db()->prepare("UPDATE plans SET is_hidden=1-COALESCE(is_hidden,0) WHERE id=?")->execute([$p1]); admin_show_plan($chat, $mid, $p1); break;
         case 'a_plan_del': db()->prepare("DELETE FROM plans WHERE id=?")->execute([$p1]); admin_list_plans($chat, $mid); break;
+        case 'a_planprice':
+            set_step($tg, 'admin_planprice'); set_temp($tg, ['plan_edit' => $p1]);
+            edit($chat, $mid, "💰 قیمت جدید پلن را به تومان وارد کنید:\n/cancel برای لغو");
+            break;
         case 'a_plan_order':
             set_step($tg, 'admin_plan_order_user'); set_temp($tg, ['po_plan' => $p1]);
             edit($chat, $mid, "🎁 <b>ثبت این پلن برای کاربر</b>\n\nآیدی عددی یا یوزرنیم کاربر را ارسال کنید (کاربر باید قبلاً ربات را /start کرده باشد):\n/cancel برای لغو");
             break;
         case 'a_planset':
-            set_step($tg, 'admin_planset_inbound'); set_temp($tg, ['plan_edit' => $p1]);
-            edit($chat, $mid, "🔌 آیدی اینباند پنل 3x-ui برای این پلن را وارد کنید:\n<b>۰ = تحویل دستی</b>\n(برای دیدن آیدی اینباندها: ⚙️ تنظیمات → 🔌 اتصال پنل → تست اتصال)\n/cancel برای لغو");
+            set_temp($tg, ['plan_edit' => $p1]);
+            admin_plan_ask_panel($chat, $tg, 'a_pspanel', $mid);
+            break;
+        case 'a_pcpanel': // انتخاب پنل هنگام ساخت پلن
+            $t = get_temp($tg); $t['panel_id'] = (int)$p1; set_temp($tg, $t);
+            if ((int)$p1 === 0) {
+                // تحویل دستی → ساخت پلن بدون پنل
+                $t['inbound_id'] = 0; $t['traffic_gb'] = 0; set_temp($tg, $t);
+                db()->prepare("INSERT INTO plans(category_id, location_id, title, description, price, panel_id, inbound_id, traffic_gb, duration_days, created_at) VALUES(?,?,?,?,?,?,?,?,?,?)")
+                    ->execute([$t['cat'], $t['loc'], $t['title'], $t['desc'], $t['price'], 0, 0, 0, 0, now()]);
+                set_step($tg, ''); set_temp($tg, []);
+                send($chat, "✅ پلن «{$t['title']}» با قیمت " . fmt($t['price']) . " تومان (تحویل دستی) اضافه شد.");
+                admin_list_plans($chat);
+            } else {
+                set_step($tg, 'admin_plan_inbound');
+                send($chat, "🔌 آیدی اینباند این پنل را وارد کنید:\n(برای دیدن آیدی اینباندها: پنل را در «🔌 پنل‌ها» تست کنید)\n/cancel برای لغو");
+            }
+            break;
+        case 'a_pspanel': // انتخاب پنل هنگام ویرایش تحویل پلن
+            $t = get_temp($tg); $t['panel_id'] = (int)$p1; set_temp($tg, $t);
+            $pid = (int)($t['plan_edit'] ?? 0);
+            if ((int)$p1 === 0) {
+                db()->prepare("UPDATE plans SET panel_id=0, inbound_id=0, traffic_gb=0, duration_days=0 WHERE id=?")->execute([$pid]);
+                set_step($tg, ''); set_temp($tg, []);
+                send($chat, "✅ پلن به حالت تحویل دستی (بدون پنل) تنظیم شد.");
+                admin_show_plan($chat, null, $pid);
+            } else {
+                set_step($tg, 'admin_planset_inbound');
+                send($chat, "🔌 آیدی اینباند این پنل را وارد کنید:\n/cancel برای لغو");
+            }
             break;
 
         /* سفارش‌ها */
@@ -438,13 +500,36 @@ function admin_handle_callback($cb, $u) {
         case 'a_toggle_join': set_setting('forced_join', setting('forced_join') === '1' ? '0' : '1'); admin_settings($chat, $mid); break;
         case 'a_toggle_card': set_setting('card_enabled', setting('card_enabled') === '1' ? '0' : '1'); admin_settings($chat, $mid); break;
 
-        /* پنل 3x-ui */
-        case 'a_panel': admin_panel_config($chat, $mid); break;
-        case 'a_toggle_pauto': set_setting('panel_auto', setting('panel_auto') === '1' ? '0' : '1'); admin_panel_config($chat, $mid); break;
+        /* پنل‌های 3x-ui (چندتایی) */
+        case 'a_panel': admin_panels_list($chat, $mid); break;
+        case 'a_panels': admin_panels_list($chat, $mid); break;
+        case 'a_toggle_pauto': set_setting('panel_auto', setting('panel_auto') === '1' ? '0' : '1'); admin_panels_list($chat, $mid); break;
+        case 'a_panel_add':
+            set_step($tg, 'admin_panel_addname'); set_temp($tg, []);
+            edit($chat, $mid, "➕ <b>افزودن پنل جدید</b>\n\nیک نام دلخواه برای این پنل وارد کنید (مثلاً: آلمان ۱):\n/cancel برای لغو");
+            break;
+        case 'a_panelv': admin_panel_view($chat, $mid, $p1); break;
+        case 'a_panel_tg': db()->prepare("UPDATE panels SET is_active=1-is_active WHERE id=?")->execute([$p1]); admin_panel_view($chat, $mid, $p1); break;
+        case 'a_panel_del':
+            db()->prepare("DELETE FROM panels WHERE id=?")->execute([$p1]);
+            db()->prepare("UPDATE plans SET panel_id=0, inbound_id=0 WHERE panel_id=?")->execute([$p1]);
+            admin_panels_list($chat, $mid);
+            break;
+        case 'a_pset':
+            $field = $parts[2] ?? '';
+            $labels = [
+                'name' => 'نام پنل', 'url' => 'آدرس پنل (شامل مسیر پایه، مثل https://host:port/path)',
+                'username' => 'یوزرنیم پنل', 'password' => 'پسورد پنل',
+                'address' => 'آدرس/دامنه سرور برای لینک کانفیگ (مثل dns یا IP)',
+                'sub_url' => 'آدرس Subscription (اختیاری، مثل https://host:2096/sub)',
+            ];
+            set_step($tg, 'admin_pset'); set_temp($tg, ['panel_id' => (int)$p1, 'field' => $field]);
+            edit($chat, $mid, "✏️ مقدار جدید برای «" . ($labels[$field] ?? $field) . "» را وارد کنید:\n/cancel برای لغو");
+            break;
         case 'a_ptest':
             edit($chat, $mid, "⏳ در حال تست اتصال به پنل...");
-            list($ok, $report) = panel_test();
-            edit($chat, $mid, ($ok ? "" : "❌ ") . $report, inline([[btn('🔙 بازگشت', 'a_panel')]]));
+            list($ok, $report) = panel_test((int)$p1);
+            edit($chat, $mid, ($ok ? "" : "❌ ") . $report, inline([[btn('🔙 بازگشت', 'a_panelv:' . $p1)]]));
             break;
 
         /* بکاپ و بازگردانی */
@@ -553,20 +638,25 @@ function admin_show_plan($chat, $mid, $pid) {
     $gb = (int)($p['traffic_gb'] ?? 0);
     $dur = (int)($p['duration_days'] ?? 0);
     $hidden = (int)($p['is_hidden'] ?? 0) === 1;
+    $pnlId = (int)($p['panel_id'] ?? 0);
+    $pnl = $pnlId > 0 ? panel_get($pnlId) : null;
+    $pnlName = $pnl ? $pnl['name'] : 'بدون پنل (دستی)';
     $t = "📦 <b>پلن #{$p['id']} — {$p['title']}</b>\n\n"
        . "🗂 دسته: {$p['cat']}\n🌍 لوکیشن: {$p['flag']}{$p['loc']}\n"
        . "💰 قیمت: " . fmt($p['price']) . " تومان\n"
        . "وضعیت: " . ($p['is_active'] ? '🟢 فعال' : '🔴 غیرفعال') . "\n"
        . "نمایش: " . ($hidden ? '🔒 مخفی از کاربران (فقط ادمین)' : '👁 قابل مشاهده برای کاربران') . "\n\n"
        . "⚡ <b>تحویل خودکار (3x-ui):</b>\n"
+       . "🖥 پنل: <b>{$pnlName}</b>\n"
        . "🔌 اینباند: " . ($inb > 0 ? "#{$inb}" : 'غیرفعال (تحویل دستی)') . "\n"
        . "📦 حجم: " . ($gb > 0 ? $gb . ' گیگ' : 'نامحدود') . "\n"
        . "⏳ مدت: " . ($dur > 0 ? $dur . ' روز' : 'نامحدود');
     $kb = [
         [btn('🎁 ثبت این پلن برای کاربر', 'a_plan_order:' . $pid)],
+        [btn('💰 تغییر قیمت', 'a_planprice:' . $pid)],
         [btn($p['is_active'] ? '🔴 غیرفعال‌کردن' : '🟢 فعال‌کردن', 'a_plan_tg:' . $pid)],
         [btn($hidden ? '👁 نمایش به کاربران' : '🔒 مخفی‌کردن از کاربران', 'a_plan_hide:' . $pid)],
-        [btn('⚡ تنظیم تحویل خودکار', 'a_planset:' . $pid)],
+        [btn('⚡ تنظیم پنل/تحویل خودکار', 'a_planset:' . $pid)],
         [btn('🗑 حذف پلن', 'a_plan_del:' . $pid)],
         [btn('🔙 بازگشت', 'a_plans')],
     ];
@@ -663,6 +753,7 @@ function cancel_order($oid, $refund) {
     if (!$o || $o['status'] === 'rejected') return false;
     // حذف کانفیگ از پنل 3x-ui در صورت وجود اتصال
     if (function_exists('order_has_panel') && order_has_panel($o)) {
+        panel_use_for_order($o);
         panel_del_client((int)$o['panel_inbound'], $o['panel_client_id']);
     }
     db()->prepare("UPDATE orders SET status='rejected', updated_at=? WHERE id=?")->execute([now(), $oid]);
@@ -822,7 +913,7 @@ function admin_settings($chat, $mid = null) {
         [btn('☎️ پشتیبانی', 'a_set:support_username'), btn('💵 حداقل شارژ', 'a_set:min_charge')],
         [btn('📢 کانال جوین', 'a_set:channel_username'), btn($join ? '🔴 خاموش‌کردن جوین' : '🟢 روشن‌کردن جوین', 'a_toggle_join')],
         [btn($card ? '🔴 خاموش‌کردن کارت‌به‌کارت' : '🟢 روشن‌کردن کارت‌به‌کارت', 'a_toggle_card')],
-        [btn('🔌 اتصال پنل 3x-ui (تحویل خودکار)', 'a_panel')],
+        [btn('🔌 پنل‌های 3x-ui (چندتایی / تحویل خودکار)', 'a_panel')],
         [btn('⏰ هشدار و انقضای خودکار', 'a_expiry')],
         [btn('💾 بکاپ و بازگردانی', 'a_backup')],
         [btn('📝 متن خوش‌آمد', 'a_set:welcome_text')],
@@ -847,26 +938,60 @@ function admin_expiry_config($chat, $mid = null) {
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 
-function admin_panel_config($chat, $mid = null) {
+/* ---------- مدیریت پنل‌های 3x-ui (چندتایی) ---------- */
+function admin_panels_list($chat, $mid = null) {
     $auto = setting('panel_auto', '0') === '1';
-    $url = setting('panel_url', '');
-    $t = "🔌 <b>اتصال به پنل 3x-ui</b>\n\n"
-       . "🌐 آدرس پنل: " . ($url ? "<code>{$url}</code>" : '—') . "\n"
-       . "👤 یوزرنیم: " . (setting('panel_user') ?: '—') . "\n"
-       . "🔑 پسورد: " . (setting('panel_pass') ? '✅ تنظیم‌شده' : '—') . "\n"
-       . "🖥 آدرس سرور (برای لینک): " . (setting('panel_address') ?: 'خودکار از آدرس پنل') . "\n"
-       . "🔗 Subscription: " . (setting('panel_sub_url') ?: '—') . "\n"
-       . "⚡ تحویل خودکار: " . ($auto ? '🟢 فعال' : '🔴 غیرفعال') . "\n\n"
+    $rows = db()->query("SELECT * FROM panels ORDER BY id")->fetchAll();
+    $t = "🔌 <b>پنل‌های 3x-ui</b>\n\n"
+       . "⚡ تحویل خودکار (سراسری): " . ($auto ? '🟢 فعال' : '🔴 غیرفعال') . "\n"
+       . "تعداد پنل‌ها: <b>" . count($rows) . "</b>\n\n"
+       . (count($rows) ? "برای مدیریت هر پنل روی آن بزنید. هر پلن می‌تواند از یک پنل دلخواه استفاده کند." : "هنوز پنلی اضافه نکرده‌اید. با دکمه زیر یک پنل اضافه کنید.");
+    $kb = [[btn('➕ افزودن پنل', 'a_panel_add')]];
+    foreach ($rows as $r) {
+        $st = $r['is_active'] ? '🟢' : '🔴';
+        $kb[] = [btn("{$st} {$r['name']}", 'a_panelv:' . $r['id'])];
+    }
+    $kb[] = [btn($auto ? '🔴 خاموش‌کردن تحویل خودکار' : '🟢 روشن‌کردن تحویل خودکار', 'a_toggle_pauto')];
+    $kb[] = [btn('🔙 بازگشت', 'a_settings')];
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+function admin_panel_view($chat, $mid, $pid) {
+    $p = panel_get($pid);
+    if (!$p) { out($chat, $mid, "پنل یافت نشد.", inline([[btn('🔙 بازگشت', 'a_panels')]])); return; }
+    $planCount = (int)db()->query("SELECT COUNT(*) FROM plans WHERE panel_id=" . (int)$pid)->fetchColumn();
+    $t = "🔌 <b>پنل: {$p['name']}</b>\n\n"
+       . "وضعیت: " . ($p['is_active'] ? '🟢 فعال' : '🔴 غیرفعال') . "\n"
+       . "🌐 آدرس: " . ($p['url'] ? "<code>{$p['url']}</code>" : '—') . "\n"
+       . "👤 یوزرنیم: " . ($p['username'] ?: '—') . "\n"
+       . "🔑 پسورد: " . ($p['password'] ? '✅ تنظیم‌شده' : '—') . "\n"
+       . "🖥 آدرس سرور (برای لینک): " . ($p['address'] ?: 'خودکار از آدرس پنل') . "\n"
+       . "🔗 Subscription: " . ($p['sub_url'] ?: '—') . "\n"
+       . "📦 پلن‌های متصل: <b>{$planCount}</b>\n\n"
        . "ℹ️ آدرس پنل باید شامل مسیر پایه باشد، مثل:\n<code>https://example.com:54321/MyPath</code>";
     $kb = [
-        [btn('🌐 آدرس پنل', 'a_set:panel_url')],
-        [btn('👤 یوزرنیم', 'a_set:panel_user'), btn('🔑 پسورد', 'a_set:panel_pass')],
-        [btn('🖥 آدرس سرور لینک', 'a_set:panel_address')],
-        [btn('🔗 آدرس Subscription', 'a_set:panel_sub_url')],
-        [btn('🧪 تست اتصال + لیست اینباند', 'a_ptest')],
-        [btn($auto ? '🔴 خاموش‌کردن تحویل خودکار' : '🟢 روشن‌کردن تحویل خودکار', 'a_toggle_pauto')],
-        [btn('🔙 بازگشت', 'a_settings')],
+        [btn('✏️ نام', 'a_pset:' . $pid . ':name'), btn('🌐 آدرس پنل', 'a_pset:' . $pid . ':url')],
+        [btn('👤 یوزرنیم', 'a_pset:' . $pid . ':username'), btn('🔑 پسورد', 'a_pset:' . $pid . ':password')],
+        [btn('🖥 آدرس سرور لینک', 'a_pset:' . $pid . ':address')],
+        [btn('🔗 آدرس Subscription', 'a_pset:' . $pid . ':sub_url')],
+        [btn('🧪 تست اتصال + لیست اینباند', 'a_ptest:' . $pid)],
+        [btn($p['is_active'] ? '🔴 غیرفعال‌کردن' : '🟢 فعال‌کردن', 'a_panel_tg:' . $pid)],
+        [btn('🗑 حذف پنل', 'a_panel_del:' . $pid)],
+        [btn('🔙 بازگشت', 'a_panels')],
     ];
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+/* نمایش انتخاب پنل برای ساخت/ویرایش پلن — $cb یکی از a_pcpanel یا a_pspanel */
+function admin_plan_ask_panel($chat, $tg, $cb, $mid = null) {
+    $rows = db()->query("SELECT * FROM panels WHERE is_active=1 ORDER BY id")->fetchAll();
+    set_step($tg, ($cb === 'a_pcpanel') ? 'admin_plan_panel' : 'admin_planset_panel');
+    $kb = [];
+    foreach ($rows as $r) $kb[] = [btn('🔌 ' . $r['name'], $cb . ':' . $r['id'])];
+    $kb[] = [btn('✋ تحویل دستی (بدون پنل)', $cb . ':0')];
+    $t = "🔌 <b>انتخاب پنل تحویل</b>\n\nاین پلن از کدام پنل تحویل داده شود؟\n"
+       . (count($rows) ? "" : "⚠️ هیچ پنل فعالی ندارید؛ می‌توانید «تحویل دستی» را انتخاب کنید یا ابتدا از «🔌 پنل‌ها» یک پنل بسازید.\n")
+       . "(برای تحویل دستی توسط ادمین، «بدون پنل» را بزنید)";
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 

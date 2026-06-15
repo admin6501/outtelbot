@@ -103,6 +103,19 @@ function db_init() {
         key TEXT PRIMARY KEY,
         value TEXT
     )");
+    $db->exec("CREATE TABLE IF NOT EXISTS panels (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        url TEXT DEFAULT '',
+        username TEXT DEFAULT '',
+        password TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        sub_url TEXT DEFAULT '',
+        cookie TEXT DEFAULT '',
+        cookie_time INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at TEXT
+    )");
 
     $defaults = [
         'card_number'      => '0000-0000-0000-0000',
@@ -148,6 +161,7 @@ function db_init() {
     $addcol('plans', 'traffic_gb', "INTEGER DEFAULT 0");
     $addcol('plans', 'duration_days', "INTEGER DEFAULT 0");
     $addcol('plans', 'is_hidden', "INTEGER DEFAULT 0");
+    $addcol('plans', 'panel_id', "INTEGER DEFAULT 0");
     $addcol('orders', 'panel_inbound', "INTEGER DEFAULT 0");
     $addcol('orders', 'panel_client_id', "TEXT DEFAULT ''");
     $addcol('orders', 'panel_email', "TEXT DEFAULT ''");
@@ -156,6 +170,32 @@ function db_init() {
     $addcol('orders', 'warn_time_at', "TEXT DEFAULT ''");
     $addcol('orders', 'warn_vol_at', "TEXT DEFAULT ''");
     $addcol('orders', 'depleted_at', "TEXT DEFAULT ''");
+    $addcol('orders', 'panel_id', "INTEGER DEFAULT 0");
+
+    // مهاجرت: اگر پنل تکیِ قدیمی در settings تنظیم شده ولی هیچ پنلی در جدول panels نیست،
+    // یک پنل پیش‌فرض از روی تنظیمات قدیمی بساز و به پلن‌ها/سفارش‌های موجود نسبت بده.
+    $panelCount = (int)$db->query("SELECT COUNT(*) FROM panels")->fetchColumn();
+    if ($panelCount === 0) {
+        $legacyUrl = setting('panel_url', '');
+        if (trim($legacyUrl) !== '') {
+            $ins = $db->prepare("INSERT INTO panels(name,url,username,password,address,sub_url,cookie,cookie_time,is_active,created_at)
+                VALUES(?,?,?,?,?,?,?,?,1,?)");
+            $ins->execute([
+                'پنل اصلی',
+                setting('panel_url', ''),
+                setting('panel_user', ''),
+                setting('panel_pass', ''),
+                setting('panel_address', ''),
+                setting('panel_sub_url', ''),
+                setting('panel_cookie', ''),
+                (int)setting('panel_cookie_time', '0'),
+                now(),
+            ]);
+            $pid = (int)$db->lastInsertId();
+            $db->exec("UPDATE plans SET panel_id=$pid WHERE COALESCE(panel_id,0)=0 AND COALESCE(inbound_id,0)>0");
+            $db->exec("UPDATE orders SET panel_id=$pid WHERE COALESCE(panel_id,0)=0 AND COALESCE(panel_inbound,0)>0");
+        }
+    }
 }
 
 /* ---------- تنظیمات ---------- */

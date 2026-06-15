@@ -2,12 +2,58 @@
 /* =======================================================
  *  ادغام با پنل 3x-ui (تحویل خودکار اوت‌باند)
  *  https://github.com/MHSanaei/3x-ui
+ *  پشتیبانی از چند پنل: هر پلن/سفارش به یک پنل (panel_id) متصل است.
  * ======================================================= */
 
+/* ---------- مدیریت context پنل فعال ---------- */
+function panel_ctx($set = false) {
+    static $ctx = null;
+    if ($set !== false) { $ctx = $set; }
+    return $ctx;
+}
+/* خواندن یک مقدار از پنل فعال */
+function pcfg($key, $default = '') {
+    $ctx = panel_ctx();
+    if (is_array($ctx) && isset($ctx[$key]) && $ctx[$key] !== null) return $ctx[$key];
+    return $default;
+}
+function panel_get($id) {
+    $st = db()->prepare("SELECT * FROM panels WHERE id=?");
+    $st->execute([(int)$id]);
+    return $st->fetch() ?: null;
+}
+/* تنظیم پنل فعال با آیدی */
+function panel_use($panel_id) {
+    $p = ((int)$panel_id > 0) ? panel_get($panel_id) : null;
+    panel_ctx($p);
+    return $p;
+}
+/* تنظیم پنل فعال از روی سفارش */
+function panel_use_for_order($o) {
+    return panel_use((int)($o['panel_id'] ?? 0));
+}
+/* تنظیم پنل فعال از روی پلن */
+function panel_use_for_plan($plan) {
+    return panel_use((int)($plan['panel_id'] ?? 0));
+}
+/* ذخیره کوکی برای پنل فعال */
+function panel_store_cookie($cookie) {
+    $ctx = panel_ctx();
+    $t = time();
+    if (is_array($ctx)) {
+        $ctx['cookie'] = $cookie;
+        $ctx['cookie_time'] = $t;
+        panel_ctx($ctx);
+        if (!empty($ctx['id'])) {
+            db()->prepare("UPDATE panels SET cookie=?, cookie_time=? WHERE id=?")->execute([$cookie, $t, $ctx['id']]);
+        }
+    }
+}
+
 function panel_server_address() {
-    $a = trim(setting('panel_address', ''));
+    $a = trim(pcfg('address', ''));
     if ($a !== '') return $a;
-    $h = parse_url(setting('panel_url', ''), PHP_URL_HOST);
+    $h = parse_url(pcfg('url', ''), PHP_URL_HOST);
     return $h ?: '';
 }
 
@@ -20,15 +66,15 @@ function guidv4() {
 
 /* ---------- ارتباط با پنل ---------- */
 function panel_login() {
-    $url = rtrim(setting('panel_url', ''), '/');
+    $url = rtrim(pcfg('url', ''), '/');
     if (!$url) return false;
     $ch = curl_init($url . '/login');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => http_build_query([
-            'username' => setting('panel_user', ''),
-            'password' => setting('panel_pass', ''),
+            'username' => pcfg('username', ''),
+            'password' => pcfg('password', ''),
         ]),
         CURLOPT_HEADER => true,
         CURLOPT_SSL_VERIFYPEER => false,
@@ -46,8 +92,7 @@ function panel_login() {
     if (!is_array($data) || empty($data['success'])) return false;
     preg_match_all('/Set-Cookie:\s*([^;\r\n]+)/i', $headers, $m);
     if (empty($m[1])) return false;
-    set_setting('panel_cookie', implode('; ', $m[1]));
-    set_setting('panel_cookie_time', (string)time());
+    panel_store_cookie(implode('; ', $m[1]));
     return true;
 }
 
@@ -58,7 +103,7 @@ function panel_curl($full, $method = 'GET', $fields = null) {
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_SSL_VERIFYHOST => false,
         CURLOPT_TIMEOUT => 25,
-        CURLOPT_COOKIE => setting('panel_cookie', ''),
+        CURLOPT_COOKIE => pcfg('cookie', ''),
         CURLOPT_HTTPHEADER => ['Accept: application/json'],
     ];
     if ($method === 'POST') {
@@ -78,10 +123,10 @@ function panel_curl($full, $method = 'GET', $fields = null) {
 }
 
 function panel_api($method, $path, $fields = null) {
-    $url = rtrim(setting('panel_url', ''), '/');
+    $url = rtrim(pcfg('url', ''), '/');
     if (!$url) return null;
-    $age = time() - (int)setting('panel_cookie_time', '0');
-    if (!setting('panel_cookie', '') || $age > 3000) { if (!panel_login()) return null; }
+    $age = time() - (int)pcfg('cookie_time', 0);
+    if (!pcfg('cookie', '') || $age > 3000) { if (!panel_login()) return null; }
     $res = panel_curl($url . $path, $method, $fields);
     if ($res === null || (is_array($res) && !empty($res['needLogin']))) {
         if (panel_login()) $res = panel_curl($url . $path, $method, $fields);
@@ -191,14 +236,16 @@ function panel_change_client($o) {
     if (!panel_update_client($inbound_id, $oldSecret, $client)) return false;
     db()->prepare("UPDATE orders SET panel_client_id=?, panel_sub_id=? WHERE id=?")
         ->execute([$newSecret, $newSubId, $o['id']]);
-    $subUrl = trim(setting('panel_sub_url', ''));
+    $subUrl = trim(pcfg('sub_url', ''));
     if ($subUrl !== '') return rtrim($subUrl, '/') . '/' . $newSubId;
     return panel_build_link($inbound, $newSecret, $email);
 }
 
-/* تست اتصال + نمایش اینباندها */
-function panel_test() {
-    if (!setting('panel_url', '')) return [false, 'آدرس پنل تنظیم نشده است.'];
+/* تست اتصال + نمایش اینباندها (برای یک پنل مشخص) */
+function panel_test($panel_id) {
+    $p = panel_use($panel_id);
+    if (!$p) return [false, 'پنل یافت نشد.'];
+    if (!pcfg('url', '')) return [false, 'آدرس پنل تنظیم نشده است.'];
     if (!panel_login()) return [false, 'ورود ناموفق! آدرس/یوزرنیم/پسورد را بررسی کنید (آدرس باید شامل مسیر پایه پنل باشد).'];
     $list = panel_list_inbounds();
     if ($list === null) return [false, 'ورود موفق بود ولی دریافت لیست اینباندها ناموفق شد.'];
@@ -304,25 +351,31 @@ function panel_build_link($inbound, $secret, $email) {
 /* ---------- تحویل خودکار ---------- */
 function try_auto_deliver($oid) {
     if (setting('panel_auto', '0') !== '1') return false;
-    if (!setting('panel_url', '')) return false;
     $st = db()->prepare("SELECT * FROM orders WHERE id=?"); $st->execute([$oid]); $o = $st->fetch();
     if (!$o) return false;
     $plan = get_plan($o['plan_id']);
     if (!$plan || (int)($plan['inbound_id'] ?? 0) <= 0) return false;
+    // پنل این پلن را فعال کن
+    $pnl = panel_use_for_plan($plan);
+    if (!$pnl || !pcfg('url', '')) return false;
 
     // اگر تمدید است و سفارش اصلی روی پنل کلاینت دارد → همان کلاینت را تمدید کن
     $renewOf = (int)($o['renew_of'] ?? 0);
     if ($renewOf > 0) {
         $os = db()->prepare("SELECT * FROM orders WHERE id=?"); $os->execute([$renewOf]); $orig = $os->fetch();
         if ($orig && !empty($orig['panel_client_id']) && (int)$orig['panel_inbound'] > 0) {
+            // تمدید روی همان پنلِ سفارش اصلی
+            $origPanel = (int)($orig['panel_id'] ?? 0);
+            if ($origPanel > 0) panel_use($origPanel);
             $link = panel_renew_client($orig, $plan);
             if ($link !== false && $link !== '') {
-                db()->prepare("UPDATE orders SET panel_inbound=?, panel_client_id=?, panel_email=?, panel_sub_id=? WHERE id=?")
-                    ->execute([$orig['panel_inbound'], $orig['panel_client_id'], $orig['panel_email'], $orig['panel_sub_id'], $oid]);
+                db()->prepare("UPDATE orders SET panel_id=?, panel_inbound=?, panel_client_id=?, panel_email=?, panel_sub_id=? WHERE id=?")
+                    ->execute([($origPanel ?: (int)$pnl['id']), $orig['panel_inbound'], $orig['panel_client_id'], $orig['panel_email'], $orig['panel_sub_id'], $oid]);
                 deliver_order($oid, $link, true);
                 return true;
             }
-            // اگر تمدید ناموفق بود، به ساخت کلاینت جدید برمی‌گردیم
+            // اگر تمدید ناموفق بود، به ساخت کلاینت جدید برمی‌گردیم (روی پنل پلن)
+            panel_use_for_plan($plan);
         }
     }
 
@@ -330,6 +383,7 @@ function try_auto_deliver($oid) {
 }
 
 function auto_create_client_and_deliver($oid, $o, $plan) {
+    $panel_id = (int)pcfg('id', 0);
     $inbound = panel_get_inbound($plan['inbound_id']);
     if (!$inbound) return false;
     $protocol = $inbound['protocol'] ?? '';
@@ -346,12 +400,12 @@ function auto_create_client_and_deliver($oid, $o, $plan) {
     if ($protocol === 'trojan') $client['password'] = $secret; else $client['id'] = $secret;
     if (!panel_add_client($plan['inbound_id'], $client)) return false;
 
-    $subUrl = trim(setting('panel_sub_url', ''));
+    $subUrl = trim(pcfg('sub_url', ''));
     $link = $subUrl !== '' ? rtrim($subUrl, '/') . '/' . $subId : panel_build_link($inbound, $secret, $email);
     if (!$link) return false;
 
-    db()->prepare("UPDATE orders SET panel_inbound=?, panel_client_id=?, panel_email=?, panel_sub_id=? WHERE id=?")
-        ->execute([$plan['inbound_id'], $secret, $email, $subId, $oid]);
+    db()->prepare("UPDATE orders SET panel_id=?, panel_inbound=?, panel_client_id=?, panel_email=?, panel_sub_id=? WHERE id=?")
+        ->execute([$panel_id, $plan['inbound_id'], $secret, $email, $subId, $oid]);
     deliver_order($oid, $link);
     return true;
 }
@@ -392,7 +446,7 @@ function panel_renew_client($orig, $plan) {
     if (!panel_update_client($inbound_id, $secret, $client)) return false;
     // توجه: حجم مصرفی ریست نمی‌شود تا حجم باقی‌مانده حفظ شود
 
-    $subUrl = trim(setting('panel_sub_url', ''));
+    $subUrl = trim(pcfg('sub_url', ''));
     if ($subUrl !== '') return rtrim($subUrl, '/') . '/' . $subId;
     return panel_build_link($inbound, $secret, $email);
 }
@@ -404,7 +458,8 @@ function panel_renew_client($orig, $plan) {
  *  - هشدار وقتی warn_days روز یا warn_gb گیگ باقی مانده باشد
  * =================================================================== */
 function run_expiry_cron() {
-    if (setting('panel_url', '') === '') return;
+    $hasPanel = (int)db()->query("SELECT COUNT(*) FROM panels")->fetchColumn();
+    if ($hasPanel === 0) return;
     $GB = 1073741824;
     $warnDays  = (int)setting('warn_days', '2');
     $warnBytes = (int)round((float)setting('warn_gb', '1') * $GB);
@@ -414,6 +469,8 @@ function run_expiry_cron() {
 
     $orders = db()->query("SELECT * FROM orders WHERE status='delivered' AND panel_inbound>0 AND panel_email!='' AND panel_client_id!=''")->fetchAll();
     foreach ($orders as $o) {
+        // پنل مربوط به این سفارش را فعال کن
+        if (!panel_use_for_order($o)) continue;
         $live = panel_get_client_traffic($o['panel_email']);
         if (!is_array($live)) continue;
         $used  = (int)($live['up'] ?? 0) + (int)($live['down'] ?? 0);
