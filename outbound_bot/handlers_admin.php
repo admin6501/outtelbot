@@ -174,6 +174,14 @@ function admin_handle_message($msg, $u) {
             admin_panel_view($chat, null, $pid);
             break;
 
+        case 'admin_txtset':
+            $skey = $temp['skey'] ?? '';
+            if ($skey && texts_find($skey)) { set_setting($skey, $text); }
+            set_step($tg, ''); set_temp($tg, []);
+            send($chat, "✅ متن ذخیره شد.");
+            if ($skey) admin_text_item($chat, null, $skey);
+            break;
+
         case 'admin_dc_add':
             // فرمت: CODE|نوع|مقدار|حداکثر|تاریخ انقضا|آیدی پلن‌ها
             $a = array_map('trim', explode('|', $text));
@@ -563,6 +571,22 @@ function admin_handle_callback($cb, $u) {
             @unlink(backup_pending_path());
             edit($chat, $mid, "❌ بازگردانی لغو شد و فایل آپلودی حذف گردید.", inline([[btn('🔙 بازگشت', 'a_backup')]]));
             break;
+
+        /* شخصی‌سازی متن‌ها و دکمه‌ها */
+        case 'a_texts': admin_texts_menu($chat, $mid); break;
+        case 'a_txtcat': admin_texts_cat($chat, $mid, (int)$p1); break;
+        case 'a_txtedit': admin_text_item($chat, $mid, $p1); break;
+        case 'a_txtset':
+            $it = texts_find($p1);
+            if (!$it) { edit($chat, $mid, "مورد یافت نشد.", inline([[btn('🔙 بازگشت', 'a_texts')]])); break; }
+            set_step($tg, 'admin_txtset'); set_temp($tg, ['skey' => $p1]);
+            edit($chat, $mid, "✏️ متن جدید برای «<b>{$it['title']}</b>» را ارسال کنید:\n\nℹ️ می‌توانید از اموجی استفاده کنید. تگ‌های HTML مثل &lt;b&gt; هم مجازند.\n/cancel برای لغو");
+            break;
+        case 'a_txtreset':
+            $it = texts_find($p1);
+            if ($it) { set_setting($p1, $it['default']); }
+            admin_text_item($chat, $mid, $p1);
+            break;
     }
 }
 
@@ -916,6 +940,7 @@ function admin_settings($chat, $mid = null) {
         [btn('🔌 پنل‌های 3x-ui (چندتایی / تحویل خودکار)', 'a_panel')],
         [btn('⏰ هشدار و انقضای خودکار', 'a_expiry')],
         [btn('💾 بکاپ و بازگردانی', 'a_backup')],
+        [btn('✏️ متن‌ها و دکمه‌های کاربر', 'a_texts')],
         [btn('📝 متن خوش‌آمد', 'a_set:welcome_text')],
         [btn('🔙 بازگشت', 'a_back')],
     ];
@@ -992,6 +1017,50 @@ function admin_plan_ask_panel($chat, $tg, $cb, $mid = null) {
     $t = "🔌 <b>انتخاب پنل تحویل</b>\n\nاین پلن از کدام پنل تحویل داده شود؟\n"
        . (count($rows) ? "" : "⚠️ هیچ پنل فعالی ندارید؛ می‌توانید «تحویل دستی» را انتخاب کنید یا ابتدا از «🔌 پنل‌ها» یک پنل بسازید.\n")
        . "(برای تحویل دستی توسط ادمین، «بدون پنل» را بزنید)";
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+/* ---------- شخصی‌سازی متن‌ها و دکمه‌ها ---------- */
+function admin_texts_menu($chat, $mid = null) {
+    $reg = texts_registry();
+    $t = "✏️ <b>متن‌ها و دکمه‌های کاربر</b>\n\n"
+       . "از این بخش می‌توانید متن دکمه‌های منوی کاربر و پیام‌هایی که به کاربر نمایش داده می‌شود را تغییر دهید.\n\nیک دسته را انتخاب کنید:";
+    $kb = [];
+    foreach ($reg as $i => $cat) {
+        $kb[] = [btn($cat['cat'] . ' (' . count($cat['items']) . ')', 'a_txtcat:' . $i)];
+    }
+    $kb[] = [btn('🔙 بازگشت', 'a_settings')];
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+function admin_texts_cat($chat, $mid, $ci) {
+    $reg = texts_registry();
+    if (!isset($reg[$ci])) { out($chat, $mid, "دسته یافت نشد.", inline([[btn('🔙 بازگشت', 'a_texts')]])); return; }
+    $cat = $reg[$ci];
+    $kb = [];
+    foreach ($cat['items'] as $it) {
+        $cur = lbl($it['key'], $it['default']);
+        $preview = mb_substr(trim(preg_replace('/\s+/', ' ', $cur)), 0, 22);
+        $kb[] = [btn($it['title'] . ' › ' . $preview, 'a_txtedit:' . $it['key'])];
+    }
+    $kb[] = [btn('🔙 بازگشت', 'a_texts')];
+    $t = "✏️ <b>{$cat['cat']}</b>\n\nروی هر مورد بزنید تا متن آن را ببینید و تغییر دهید:";
+    $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
+}
+
+function admin_text_item($chat, $mid, $skey) {
+    $it = texts_find($skey);
+    if (!$it) { out($chat, $mid, "مورد یافت نشد.", inline([[btn('🔙 بازگشت', 'a_texts')]])); return; }
+    $cur = lbl($skey, $it['default']);
+    $isDefault = (setting($skey, null) === null || setting($skey, null) === '' || setting($skey, null) === $it['default']);
+    $t = "✏️ <b>{$it['title']}</b>\n\n"
+       . "مقدار فعلی:\n<code>" . htmlspecialchars($cur, ENT_QUOTES) . "</code>\n\n"
+       . "وضعیت: " . ($isDefault ? '🔵 پیش‌فرض' : '🟢 سفارشی‌شده');
+    $kb = [
+        [btn('✏️ تغییر متن', 'a_txtset:' . $skey)],
+        [btn('♻️ بازگردانی به پیش‌فرض', 'a_txtreset:' . $skey)],
+        [btn('🔙 بازگشت', 'a_texts')],
+    ];
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 

@@ -300,10 +300,11 @@ function btn($text, $data) { return ['text' => $text, 'callback_data' => $data];
 function url_btn($text, $url) { return ['text' => $text, 'url' => $url]; }
 
 function main_menu_kb($tg = null) {
+    $m = mm_labels();
     $kb = [
-        [['text' => '🛒 خرید اوت‌باند'], ['text' => '👛 کیف پول']],
-        [['text' => '📦 سفارش‌های من'], ['text' => '🎁 کد تخفیف']],
-        [['text' => '👥 زیرمجموعه‌گیری'], ['text' => '☎️ پشتیبانی']],
+        [['text' => $m['buy']], ['text' => $m['wallet']]],
+        [['text' => $m['orders']], ['text' => $m['discount']]],
+        [['text' => $m['referral']], ['text' => $m['support']]],
     ];
     if ($tg !== null && is_admin($tg)) {
         $kb[] = [['text' => '🛠 پنل مدیریت']];

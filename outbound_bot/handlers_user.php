@@ -16,7 +16,7 @@ function user_handle_message($msg, $u) {
     }
     if ($text === '/cancel') {
         set_step($tg, ''); set_temp($tg, []);
-        send($chat, '✅ عملیات لغو شد.', main_menu_kb($tg));
+        send($chat, lbl('txt_cancelled', '✅ عملیات لغو شد.'), main_menu_kb($tg));
         return;
     }
 
@@ -40,16 +40,14 @@ function user_handle_message($msg, $u) {
     }
 
     // منوی اصلی
-    switch ($text) {
-        case '🛒 خرید اوت‌باند': show_categories($chat); break;
-        case '👛 کیف پول':       show_wallet($chat, get_user($tg)); break;
-        case '📦 سفارش‌های من':   show_my_orders($chat, $tg); break;
-        case '🎁 کد تخفیف':       send($chat, "🎁 برای استفاده از کد تخفیف، ابتدا یک پلن را برای خرید انتخاب کنید و سپس گزینه «اعمال کد تخفیف» را بزنید."); break;
-        case '👥 زیرمجموعه‌گیری':  show_referral($chat, $tg); break;
-        case '☎️ پشتیبانی':       show_support($chat); break;
-        default:
-            send($chat, 'یکی از گزینه‌های منو را انتخاب کنید 👇', main_menu_kb($tg));
-    }
+    $m = mm_labels();
+    if ($text === $m['buy'])            { show_categories($chat); return; }
+    if ($text === $m['wallet'])         { show_wallet($chat, get_user($tg)); return; }
+    if ($text === $m['orders'])         { show_my_orders($chat, $tg); return; }
+    if ($text === $m['discount'])       { send($chat, lbl('txt_discount_hint', '🎁 برای استفاده از کد تخفیف، ابتدا یک پلن را برای خرید انتخاب کنید و سپس گزینه «اعمال کد تخفیف» را بزنید.')); return; }
+    if ($text === $m['referral'])       { show_referral($chat, $tg); return; }
+    if ($text === $m['support'])        { show_support($chat); return; }
+    send($chat, lbl('txt_choose_menu', 'یکی از گزینه‌های منو را انتخاب کنید 👇'), main_menu_kb($tg));
 }
 
 function handle_start($msg, $text, $u) {
@@ -130,8 +128,8 @@ function show_plan_detail($chat, $mid, $tg, $plan_id) {
         $t .= "💳 مبلغ قابل پرداخت: <b>" . fmt($final) . "</b> تومان\n";
     }
     $kb = [
-        [btn('🛒 خرید این پلن', 'buyplan:' . $plan_id)],
-        [btn('🎁 اعمال کد تخفیف', 'dc:' . $plan_id)],
+        [btn(lbl('txt_btn_buy_plan', '🛒 خرید این پلن'), 'buyplan:' . $plan_id)],
+        [btn(lbl('txt_btn_apply_discount', '🎁 اعمال کد تخفیف'), 'dc:' . $plan_id)],
         [btn('🔙 بازگشت', 'loc:' . $p['category_id'] . ':' . $p['location_id'])],
     ];
     edit($chat, $mid, $t, inline($kb));
@@ -147,11 +145,11 @@ function show_payment_options($chat, $mid, $tg, $plan_id) {
 
     $t = "💳 <b>روش پرداخت را انتخاب کنید</b>\n\nمبلغ قابل پرداخت: <b>" . fmt($final) . "</b> تومان\nموجودی کیف پول شما: " . fmt($u['balance']) . " تومان";
     $kb = [];
-    $kb[] = [btn('👛 پرداخت از کیف پول', 'pw:' . $plan_id)];
+    $kb[] = [btn(lbl('txt_btn_pay_wallet', '👛 پرداخت از کیف پول'), 'pw:' . $plan_id)];
     if (setting('card_enabled', '1') === '1') {
-        $kb[] = [btn('💳 کارت به کارت', 'pc:' . $plan_id)];
+        $kb[] = [btn(lbl('txt_btn_pay_card', '💳 کارت به کارت'), 'pc:' . $plan_id)];
     } else {
-        $kb[] = [btn('☎️ پرداخت از طریق پشتیبانی', 'paysupport:' . $plan_id)];
+        $kb[] = [btn(lbl('txt_btn_pay_support', '☎️ پرداخت از طریق پشتیبانی'), 'paysupport:' . $plan_id)];
     }
     $kb[] = [btn('🔙 بازگشت', 'plan:' . $plan_id)];
     edit($chat, $mid, $t, inline($kb));
@@ -257,8 +255,8 @@ function handle_order_receipt($tg, $chat, $file_id) {
 function show_wallet($chat, $u, $mid = null) {
     $t = "👛 <b>کیف پول شما</b>\n\n💰 موجودی: <b>" . fmt($u['balance']) . "</b> تومان";
     $kb = inline([
-        [btn('➕ شارژ کیف پول', 'wallet_charge')],
-        [btn('📜 تاریخچه تراکنش‌ها', 'wallet_tx')],
+        [btn(lbl('txt_btn_charge', '➕ شارژ کیف پول'), 'wallet_charge')],
+        [btn(lbl('txt_btn_tx', '📜 تاریخچه تراکنش‌ها'), 'wallet_tx')],
         [btn('🔙 بازگشت به منوی اصلی', 'close')],
     ]);
     $mid ? edit($chat, $mid, $t, $kb) : send($chat, $t, $kb);
@@ -422,7 +420,7 @@ function show_my_order_detail($chat, $mid, $tg, $oid) {
     }
     $plan = get_plan($o['plan_id']);
     if ($plan && $plan['is_active']) {
-        $kb[] = [btn('🔄 تمدید این سفارش', 'renew:' . $o['id'])];
+        $kb[] = [btn(lbl('txt_btn_renew', '🔄 تمدید این سفارش'), 'renew:' . $o['id'])];
     } else {
         $kb[] = [btn('🛒 مشاهده پلن‌های موجود', 'buy_home')];
     }
@@ -538,7 +536,8 @@ function show_referral($chat, $tg, $mid = null) {
 /* ---------- پشتیبانی ---------- */
 function show_support($chat) {
     $s = setting('support_username', '');
-    send($chat, "☎️ <b>پشتیبانی</b>\n\nبرای ارتباط با پشتیبانی به آیدی زیر پیام دهید:\n@" . ltrim($s, '@'));
+    $intro = lbl('txt_support_intro', "☎️ <b>پشتیبانی</b>\n\nبرای ارتباط با پشتیبانی به آیدی زیر پیام دهید:");
+    send($chat, $intro . "\n@" . ltrim($s, '@'));
 }
 
 /* ---------- کال‌بک‌های کاربر ---------- */

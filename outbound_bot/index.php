@@ -4,6 +4,7 @@
  * ======================================================= */
 require __DIR__ . '/config.php';
 require __DIR__ . '/bot.php';
+require __DIR__ . '/texts.php';
 require __DIR__ . '/panel.php';
 require __DIR__ . '/handlers_user.php';
 require __DIR__ . '/handlers_admin.php';
