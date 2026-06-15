@@ -188,6 +188,20 @@ function admin_handle_message($msg, $u) {
             admin_show_user($chat, null, $usr['tg_id']);
             break;
 
+        case 'admin_plan_order_user':
+            $q = ltrim($text, '@');
+            $usr = null;
+            if (ctype_digit($q)) { $usr = get_user((int)$q); }
+            if (!$usr) {
+                $st = db()->prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE");
+                $st->execute([$q]); $usr = $st->fetch();
+            }
+            if (!$usr) { send($chat, "❌ کاربر یافت نشد. کاربر باید حداقل یک‌بار ربات را /start کرده باشد.\nدوباره آیدی/یوزرنیم را بفرستید یا /cancel بزنید."); break; }
+            $pid = (int)($temp['po_plan'] ?? 0);
+            set_step($tg, ''); set_temp($tg, []);
+            admin_create_order_for_user($tg, $chat, null, $usr['tg_id'], $pid);
+            break;
+
         case 'admin_ubal':
             $amount = (int)preg_replace('/[^\d\-]/', '', $text);
             $uid = $temp['uid'];
@@ -302,7 +316,12 @@ function admin_handle_callback($cb, $u) {
         case 'a_pcat': $t = get_temp($tg); $t['cat'] = $p1; set_temp($tg, $t); admin_plan_pick_loc($chat, $mid); break;
         case 'a_ploc': $t = get_temp($tg); $t['loc'] = $p1; set_temp($tg, $t); set_step($tg, 'admin_plan_title'); edit($chat, $mid, "📦 عنوان پلن را وارد کنید:\n/cancel برای لغو"); break;
         case 'a_plan_tg': db()->prepare("UPDATE plans SET is_active=1-is_active WHERE id=?")->execute([$p1]); admin_show_plan($chat, $mid, $p1); break;
+        case 'a_plan_hide': db()->prepare("UPDATE plans SET is_hidden=1-COALESCE(is_hidden,0) WHERE id=?")->execute([$p1]); admin_show_plan($chat, $mid, $p1); break;
         case 'a_plan_del': db()->prepare("DELETE FROM plans WHERE id=?")->execute([$p1]); admin_list_plans($chat, $mid); break;
+        case 'a_plan_order':
+            set_step($tg, 'admin_plan_order_user'); set_temp($tg, ['po_plan' => $p1]);
+            edit($chat, $mid, "🎁 <b>ثبت این پلن برای کاربر</b>\n\nآیدی عددی یا یوزرنیم کاربر را ارسال کنید (کاربر باید قبلاً ربات را /start کرده باشد):\n/cancel برای لغو");
+            break;
         case 'a_planset':
             set_step($tg, 'admin_planset_inbound'); set_temp($tg, ['plan_edit' => $p1]);
             edit($chat, $mid, "🔌 آیدی اینباند پنل 3x-ui برای این پلن را وارد کنید:\n<b>۰ = تحویل دستی</b>\n(برای دیدن آیدی اینباندها: ⚙️ تنظیمات → 🔌 اتصال پنل → تست اتصال)\n/cancel برای لغو");
@@ -515,11 +534,12 @@ function admin_list_plans($chat, $mid = null) {
     foreach ($rows as $r) {
         $st = $r['is_active'] ? '🟢' : '🔴';
         $auto = (int)($r['inbound_id'] ?? 0) > 0 ? '⚡' : '';
-        $label = "{$st}{$auto} #{$r['id']} {$r['title']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
+        $hid = (int)($r['is_hidden'] ?? 0) ? '🔒' : '';
+        $label = "{$st}{$auto}{$hid} #{$r['id']} {$r['title']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
         $kb[] = [btn(mb_substr($label, 0, 60), 'a_planv:' . $r['id'])];
     }
     $kb[] = [btn('🔙 بازگشت', 'a_back')];
-    $t = "📦 <b>مدیریت پلن‌ها</b>\nروی هر پلن بزنید تا جزئیات و تنظیمات آن باز شود.\n⚡ = تحویل خودکار فعال | ℹ️ عدد بعد از # آیدی پلن است.";
+    $t = "📦 <b>مدیریت پلن‌ها</b>\nروی هر پلن بزنید تا جزئیات و تنظیمات آن باز شود.\n⚡ = تحویل خودکار | 🔒 = مخفی از کاربران | ℹ️ عدد بعد از # آیدی پلن است.";
     $mid ? edit($chat, $mid, $t, inline($kb)) : send($chat, $t, inline($kb));
 }
 
@@ -532,16 +552,20 @@ function admin_show_plan($chat, $mid, $pid) {
     $inb = (int)($p['inbound_id'] ?? 0);
     $gb = (int)($p['traffic_gb'] ?? 0);
     $dur = (int)($p['duration_days'] ?? 0);
+    $hidden = (int)($p['is_hidden'] ?? 0) === 1;
     $t = "📦 <b>پلن #{$p['id']} — {$p['title']}</b>\n\n"
        . "🗂 دسته: {$p['cat']}\n🌍 لوکیشن: {$p['flag']}{$p['loc']}\n"
        . "💰 قیمت: " . fmt($p['price']) . " تومان\n"
-       . "وضعیت: " . ($p['is_active'] ? '🟢 فعال' : '🔴 غیرفعال') . "\n\n"
+       . "وضعیت: " . ($p['is_active'] ? '🟢 فعال' : '🔴 غیرفعال') . "\n"
+       . "نمایش: " . ($hidden ? '🔒 مخفی از کاربران (فقط ادمین)' : '👁 قابل مشاهده برای کاربران') . "\n\n"
        . "⚡ <b>تحویل خودکار (3x-ui):</b>\n"
        . "🔌 اینباند: " . ($inb > 0 ? "#{$inb}" : 'غیرفعال (تحویل دستی)') . "\n"
        . "📦 حجم: " . ($gb > 0 ? $gb . ' گیگ' : 'نامحدود') . "\n"
        . "⏳ مدت: " . ($dur > 0 ? $dur . ' روز' : 'نامحدود');
     $kb = [
+        [btn('🎁 ثبت این پلن برای کاربر', 'a_plan_order:' . $pid)],
         [btn($p['is_active'] ? '🔴 غیرفعال‌کردن' : '🟢 فعال‌کردن', 'a_plan_tg:' . $pid)],
+        [btn($hidden ? '👁 نمایش به کاربران' : '🔒 مخفی‌کردن از کاربران', 'a_plan_hide:' . $pid)],
         [btn('⚡ تنظیم تحویل خودکار', 'a_planset:' . $pid)],
         [btn('🗑 حذف پلن', 'a_plan_del:' . $pid)],
         [btn('🔙 بازگشت', 'a_plans')],
@@ -739,19 +763,20 @@ function admin_uo_pick_plan($chat, $mid, $uid) {
     $kb = [];
     foreach ($rows as $r) {
         $auto = (int)($r['inbound_id'] ?? 0) > 0 ? '⚡' : '';
-        $label = "{$auto}#{$r['id']} {$r['title']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
+        $hid = (int)($r['is_hidden'] ?? 0) ? '🔒' : '';
+        $label = "{$auto}{$hid}#{$r['id']} {$r['title']} | {$r['flag']}{$r['loc']} | " . fmt($r['price']);
         $kb[] = [btn(mb_substr($label, 0, 60), 'a_uo_pick:' . $uid . ':' . $r['id'])];
     }
     $kb[] = [btn('🔙 بازگشت', 'a_user:' . $uid)];
-    $t = "🎁 <b>ثبت سفارش برای کاربر</b>\n👤 {$un}\n\nپلنی که می‌خواهید برای این کاربر فعال کنید را انتخاب کنید:\n⚡ = تحویل خودکار از پنل 3x-ui";
+    $t = "🎁 <b>ثبت سفارش برای کاربر</b>\n👤 {$un}\n\nپلنی که می‌خواهید برای این کاربر فعال کنید را انتخاب کنید:\n⚡ = تحویل خودکار از پنل 3x-ui | 🔒 = پلن مخفی";
     edit($chat, $mid, $t, inline($kb));
 }
 
 function admin_create_order_for_user($admin_tg, $chat, $mid, $uid, $plan_id) {
     $p = get_plan($plan_id);
-    if (!$p) { edit($chat, $mid, "❌ پلن یافت نشد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]])); return; }
+    if (!$p) { out($chat, $mid, "❌ پلن یافت نشد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]])); return; }
     $usr = get_user($uid);
-    if (!$usr) { edit($chat, $mid, "❌ کاربر یافت نشد."); return; }
+    if (!$usr) { out($chat, $mid, "❌ کاربر یافت نشد."); return; }
     $st = db()->prepare("INSERT INTO orders(user_tg, plan_id, plan_title, price, status, payment_method, created_at, updated_at)
         VALUES(?,?,?,?,?,?,?,?)");
     $st->execute([$uid, $p['id'], $p['title'], $p['price'], 'paid', 'admin', now(), now()]);
@@ -759,12 +784,12 @@ function admin_create_order_for_user($admin_tg, $chat, $mid, $uid, $plan_id) {
     $un = $usr['username'] ? '@' . $usr['username'] : $uid;
     // تلاش برای تحویل خودکار از پنل 3x-ui
     if (try_auto_deliver($oid)) {
-        edit($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت و اوت‌باند به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
+        out($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت و اوت‌باند به‌صورت <b>خودکار</b> از پنل ارسال شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
         return;
     }
     // تحویل دستی: درخواست متن کانفیگ از ادمین (همان جریان ارسال کانفیگ سفارش‌ها)
     set_step($admin_tg, 'admin_send_config'); set_temp($admin_tg, ['order_id' => $oid]);
-    edit($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
+    out($chat, $mid, "✅ سفارش <b>#{$oid}</b> برای کاربر {$un} ثبت شد.", inline([[btn('🔙 بازگشت', 'a_user:' . $uid)]]));
     send($chat, "✍️ اکنون متن اوت‌باند/کانفیگ سفارش #{$oid} را ارسال کنید تا برای کاربر فرستاده و سفارش تحویل شود:\n(تحویل خودکار انجام نشد یا اینباند این پلن تنظیم نشده است)\n/cancel برای لغو");
 }
 

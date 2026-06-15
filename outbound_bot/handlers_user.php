@@ -74,7 +74,11 @@ function handle_start($msg, $text, $u) {
 
 /* ---------- خرید ---------- */
 function show_categories($chat, $mid = null) {
-    $rows = db()->query("SELECT * FROM categories WHERE is_active=1 ORDER BY id")->fetchAll();
+    $rows = db()->query("SELECT DISTINCT c.* FROM categories c
+        JOIN plans p ON p.category_id=c.id
+        JOIN locations l ON l.id=p.location_id
+        WHERE c.is_active=1 AND p.is_active=1 AND p.is_hidden=0 AND l.is_active=1
+        ORDER BY c.id")->fetchAll();
     if (!$rows) {
         $t = "❌ در حال حاضر دسته‌بندی فعالی وجود ندارد.";
         $mid ? edit($chat, $mid, $t) : send($chat, $t);
@@ -90,7 +94,7 @@ function show_categories($chat, $mid = null) {
 function show_locations($chat, $mid, $cat_id) {
     $st = db()->prepare("SELECT DISTINCT l.* FROM locations l
         JOIN plans p ON p.location_id=l.id
-        WHERE l.is_active=1 AND p.is_active=1 AND p.category_id=? ORDER BY l.id");
+        WHERE l.is_active=1 AND p.is_active=1 AND p.is_hidden=0 AND p.category_id=? ORDER BY l.id");
     $st->execute([$cat_id]);
     $rows = $st->fetchAll();
     if (!$rows) { edit($chat, $mid, "❌ برای این دسته‌بندی لوکیشنی موجود نیست.", inline([[btn('🔙 بازگشت', 'buy_home')]])); return; }
@@ -101,7 +105,7 @@ function show_locations($chat, $mid, $cat_id) {
 }
 
 function show_plans($chat, $mid, $cat_id, $loc_id) {
-    $st = db()->prepare("SELECT * FROM plans WHERE is_active=1 AND category_id=? AND location_id=? ORDER BY price");
+    $st = db()->prepare("SELECT * FROM plans WHERE is_active=1 AND is_hidden=0 AND category_id=? AND location_id=? ORDER BY price");
     $st->execute([$cat_id, $loc_id]);
     $rows = $st->fetchAll();
     if (!$rows) { edit($chat, $mid, "❌ پلنی موجود نیست.", inline([[btn('🔙 بازگشت', 'cat:' . $cat_id)]])); return; }
